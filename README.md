@@ -48,6 +48,35 @@ uv run sync-remote --help
 uv run sr --help
 ```
 
+## 新电脑首次使用准备
+
+在一台新电脑上首次使用本工具，建议先确认下面这些准备项。
+
+### 必须准备
+
+- `Python 3.10+`
+- `uv`
+- `ssh`
+- 本机 SSH 私钥和公钥
+- 远端服务器已添加你的 SSH 公钥
+
+### 按需准备
+
+- 如果要使用 `open`，需要安装 VS Code 和 `code` 命令
+- 如果希望获得更好的增量上传体验，建议安装 `rsync`
+- 如果使用 `auto` 端口模式，还需要准备 Cpolar 账号，以及包含 `CPOLAR_USER` 和 `CPOLAR_PASS` 的环境变量文件
+
+### 推荐首次检查顺序
+
+```bash
+sr --help
+sr init
+sr doctor
+sr status
+```
+
+如果 `doctor` 里出现缺失项，先补齐本机依赖、SSH 配置、公钥或端口解析环境，再执行 `sr up`。
+
 ## 快速开始
 
 1. 初始化当前目录配置：
