@@ -1,0 +1,39 @@
+[project]
+name = "sync-remote"
+version = "0.2.0"
+description = "CLI tool for syncing the current project directory to a remote server"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "emmmdty" }]
+requires-python = ">=3.10"
+keywords = ["cli", "sync", "ssh", "rsync", "backup"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "python-dotenv",
+    "pyyaml",
+    "requests",
+]
+
+[project.scripts]
+sync-remote = "sync_remote.cli:run"
+sr = "sync_remote.cli:run"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
