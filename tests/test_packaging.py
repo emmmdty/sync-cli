@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,3 +52,35 @@ def test_repository_has_readme_license_and_gitignore() -> None:
 def test_repository_does_not_keep_local_project_config_files() -> None:
     assert not (ROOT / "sync-remote.yaml").exists()
     assert not (ROOT / "sync_config.yaml").exists()
+
+
+def test_repository_has_github_actions_ci_workflow() -> None:
+    workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
+
+    assert workflow_path.exists()
+
+    data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    assert data["name"] == "CI"
+    assert "push" in data["on"]
+    assert "pull_request" in data["on"]
+    assert data["on"]["push"]["branches"] == ["main"]
+    assert data["on"]["pull_request"]["branches"] == ["main"]
+
+    test_job = data["jobs"]["test"]
+    build_job = data["jobs"]["build"]
+
+    assert test_job["runs-on"] == "ubuntu-latest"
+    assert build_job["runs-on"] == "ubuntu-latest"
+    assert test_job["strategy"]["matrix"]["python-version"] == ["3.10", "3.11", "3.12"]
+
+    test_steps = test_job["steps"]
+    build_steps = build_job["steps"]
+
+    assert any(step.get("uses") == "actions/checkout@v5" for step in test_steps)
+    assert any(step.get("uses") == "astral-sh/setup-uv@v7" for step in test_steps)
+    assert any(step.get("run") == "uv sync --locked --group dev" for step in test_steps)
+    assert any(step.get("run") == "uv run pytest -q" for step in test_steps)
+
+    assert any(step.get("uses") == "actions/checkout@v5" for step in build_steps)
+    assert any(step.get("uses") == "astral-sh/setup-uv@v7" for step in build_steps)
+    assert any(step.get("run") == "uv build" for step in build_steps)
