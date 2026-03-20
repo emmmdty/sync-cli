@@ -41,6 +41,12 @@ def test_repository_has_readme_license_and_gitignore() -> None:
     assert "Python 3.10+" in readme_content
     assert "如果要使用 `open`，需要安装 VS Code 和 `code` 命令" in readme_content
     assert "如果使用 `auto` 端口模式，还需要准备 Cpolar 账号" in readme_content
+    assert "### 如果缺少配置，怎么补" in readme_content
+    assert "ssh-keygen -t ed25519" in readme_content
+    assert "ssh-copy-id user@hostname" in readme_content
+    assert "Host remote-server" in readme_content
+    assert "sr up --transport archive" in readme_content
+    assert "CPOLAR_USER=你的账号" in readme_content
     assert "uv tool install ." in readme_content
     assert "sync-remote init" in readme_content
     assert "sr up" in readme_content

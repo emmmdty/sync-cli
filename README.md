@@ -77,6 +77,82 @@ sr status
 
 如果 `doctor` 里出现缺失项，先补齐本机依赖、SSH 配置、公钥或端口解析环境，再执行 `sr up`。
 
+### 如果缺少配置，怎么补
+
+#### 1. 没有 SSH 密钥
+
+先在本机生成一对新的 SSH 密钥：
+
+```bash
+ssh-keygen -t ed25519 -C "your_email@example.com"
+```
+
+生成后，默认会得到：
+
+- `~/.ssh/id_ed25519`
+- `~/.ssh/id_ed25519.pub`
+
+#### 2. 远端服务器还没有你的公钥
+
+如果远端已经能通过密码登录，可以直接执行：
+
+```bash
+ssh-copy-id user@hostname
+```
+
+如果没有 `ssh-copy-id`，也可以手动把公钥内容追加到远端的 `~/.ssh/authorized_keys`。
+
+#### 3. 没有 `~/.ssh/config`
+
+可以自己创建一个最小配置，例如：
+
+```sshconfig
+Host remote-server
+  HostName example.com
+  User user
+  Port 22
+  IdentityFile ~/.ssh/id_ed25519
+```
+
+保存后可以先验证：
+
+```bash
+ssh remote-server
+```
+
+#### 4. 没有 `code` 命令
+
+如果要使用 `sr op` 或 `sync-remote open`，需要让 VS Code 的命令行可用。
+
+常见做法是在 VS Code 里打开命令面板，然后执行：
+
+```text
+Shell Command: Install 'code' command in PATH
+```
+
+#### 5. 没有 `rsync`
+
+没有 `rsync` 时，工具会自动回退到 `archive` 模式，但 `--sync-path` 这类精细同步能力会受限。
+
+如果当前机器暂时没有 `rsync`，仍然可以这样用：
+
+```bash
+sr up --transport archive
+```
+
+#### 6. 没有 Cpolar 环境变量文件
+
+如果你要用 `auto` 端口模式，需要准备一个环境变量文件，例如 `~/.env`：
+
+```bash
+CPOLAR_USER=你的账号
+CPOLAR_PASS=你的密码
+```
+
+然后在 `sr init` 时选择 `auto`，并把环境变量文件路径填成 `~/.env`。
+
+如果你没有 Cpolar，或者不想依赖动态端口解析，可以直接在初始化时选择 `fixed` 模式，手动填写 SSH 端口。
+
 ## 快速开始
 
 1. 初始化当前目录配置：
