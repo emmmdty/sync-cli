@@ -226,6 +226,95 @@ sync-remote open --help
 /srv/projects/demo-project
 ```
 
+## 配置示例
+
+下面给出两种常见配置示例，方便在新电脑上快速对照填写。
+
+### `auto` 模式示例
+
+适合通过 Cpolar 一类隧道暴露 SSH，公网端口会变化的场景。
+
+对应的 `sync-remote.yaml` 可以长这样：
+
+```yaml
+version: 1
+project:
+  remote_base_dir: /srv/projects
+  append_project_dir: true
+connection:
+  user: user
+  host: cpolar-server
+  hostname: example.tcp.vip.cpolar.cn
+  port_mode: auto
+  port: null
+  ssh_config_path: ~/.ssh/config
+  ssh_key_path: ~/.ssh/id_ed25519
+  known_hosts_check: true
+cpolar:
+  tunnel_name: my-tunnel
+  env_path: ~/.env
+sync:
+  transport: rsync
+  max_file_size_mb: 50
+backup:
+  excludes:
+    - .git
+```
+
+对应的 Cpolar 环境变量文件例如：
+
+```bash
+CPOLAR_USER=你的账号
+CPOLAR_PASS=你的密码
+```
+
+在这个模式下，端口不是写死在配置里的，而是运行时自动解析。  
+例如某次 `status` 里可能会看到解析结果：
+
+```text
+SSH HostName: example.tcp.vip.cpolar.cn
+端口: 45678
+```
+
+### `fixed` 模式示例
+
+适合远端 SSH 端口固定、你已经明确知道 `hostname` 和 `port` 的场景。
+
+```yaml
+version: 1
+project:
+  remote_base_dir: /srv/projects
+  append_project_dir: true
+connection:
+  user: user
+  host: remote-server
+  hostname: example.com
+  port_mode: fixed
+  port: 22
+  ssh_config_path: ~/.ssh/config
+  ssh_key_path: ~/.ssh/id_ed25519
+  known_hosts_check: true
+cpolar:
+  tunnel_name: my-tunnel
+  env_path: ~/.env
+sync:
+  transport: rsync
+  max_file_size_mb: 50
+backup:
+  excludes:
+    - .git
+```
+
+如果你同时维护 `~/.ssh/config`，可以对应写成：
+
+```sshconfig
+Host remote-server
+  HostName example.com
+  User user
+  Port 22
+  IdentityFile ~/.ssh/id_ed25519
+```
+
 ## 典型工作流
 
 ### 日常同步

@@ -51,6 +51,11 @@ def test_repository_has_readme_license_and_gitignore() -> None:
     assert "sync-remote init" in readme_content
     assert "sr up" in readme_content
     assert "适合通过 Cpolar 等隧道暴露 SSH，且公网端口经常变化的场景" in readme_content
+    assert "## 配置示例" in readme_content
+    assert "port_mode: auto" in readme_content
+    assert "hostname: example.tcp.vip.cpolar.cn" in readme_content
+    assert "端口: 45678" in readme_content
+    assert "host: remote-server" in readme_content
     assert "`sync_to_remote.py` 只是兼容包装层" in readme_content
     assert "它会把旧调用方式转发到新的 `sync-remote` CLI" in readme_content
     assert "MIT" in readme_content
