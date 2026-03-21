@@ -37,6 +37,7 @@ def test_repository_has_readme_license_and_gitignore() -> None:
     assert "## 适用群体" in readme_content
     assert "需要在本地项目目录和远端服务器目录之间高频同步代码" in readme_content
     assert "远端 SSH 端口会变化" in readme_content
+    assert "不想手动维护 SSH 配置、密钥或实时同步脚本" in readme_content
     assert "## 新电脑首次使用准备" in readme_content
     assert "Python 3.10+" in readme_content
     assert "如果要使用 `open`，需要安装 VS Code 和 `code` 命令" in readme_content
@@ -45,15 +46,20 @@ def test_repository_has_readme_license_and_gitignore() -> None:
     assert "ssh-keygen -t ed25519" in readme_content
     assert "ssh-copy-id user@hostname" in readme_content
     assert "Host remote-server" in readme_content
+    assert "如果本机已有 `~/.ssh/config`，`sr init` 会自动列出可选 Host" in readme_content
     assert "sr up --transport archive" in readme_content
+    assert "`password` 模式需要本机安装 `sshpass`" in readme_content
     assert "CPOLAR_USER=你的账号" in readme_content
     assert "uv tool install ." in readme_content
     assert "sync-remote init" in readme_content
     assert "sr up" in readme_content
+    assert "sr watch" in readme_content
+    assert "sync-remote open --watch" in readme_content
     assert "适合通过 Cpolar 等隧道暴露 SSH，且公网端口经常变化的场景" in readme_content
     assert "## 配置示例" in readme_content
     assert "port_mode: auto" in readme_content
     assert "hostname: example.tcp.vip.cpolar.cn" in readme_content
+    assert "auth_mode: key" in readme_content
     assert "端口: 45678" in readme_content
     assert "host: remote-server" in readme_content
     assert "`sync_to_remote.py` 只是兼容包装层" in readme_content

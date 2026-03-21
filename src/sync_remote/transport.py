@@ -17,75 +17,13 @@ from dotenv import load_dotenv
 
 from .config import ProjectConfig, expand_user_path
 from .operations import create_tar_archive
+from .ssh_config import SSHHostEntry, parse_ssh_config_blocks, read_ssh_host_entry, select_ssh_block, upsert_ssh_host_entry
 
 RSYNC_RETRYABLE_EXIT_CODES = {10, 11, 12, 30, 35, 255}
 
 
 def generate_secure_temp_name(prefix: str = "sync", suffix: str = ".tar.gz") -> str:
     return f"{prefix}_{secrets.token_hex(8)}{suffix}"
-
-
-def parse_ssh_config_blocks(lines: list[str]) -> list[dict]:
-    blocks: list[dict] = []
-    current: dict | None = None
-
-    for idx, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-
-        if re.match(r"^\s*Host\s+", line):
-            if current:
-                current["end"] = idx
-                blocks.append(current)
-            current = {
-                "start": idx,
-                "end": len(lines),
-                "patterns": stripped.split()[1:],
-                "hostname": None,
-                "hostname_idx": None,
-                "hostname_indent": None,
-                "port": None,
-                "port_idx": None,
-                "port_indent": None,
-            }
-            continue
-
-        if current is None:
-            continue
-
-        hostname_match = re.match(r"^(\s*)HostName\s+(.+)$", line)
-        if hostname_match and current["hostname"] is None:
-            current["hostname"] = hostname_match.group(2).strip()
-            current["hostname_idx"] = idx
-            current["hostname_indent"] = hostname_match.group(1)
-
-        port_match = re.match(r"^(\s*)Port\s+(\S+)", line)
-        if port_match and current["port"] is None:
-            current["port"] = port_match.group(2).strip()
-            current["port_idx"] = idx
-            current["port_indent"] = port_match.group(1)
-
-    if current:
-        blocks.append(current)
-    return blocks
-
-
-def select_ssh_block(blocks: list[dict], remote_host: str) -> dict | None:
-    for block in blocks:
-        if any(pattern == remote_host for pattern in block["patterns"]):
-            return block
-
-    for block in blocks:
-        for pattern in block["patterns"]:
-            if fnmatch.fnmatch(remote_host, pattern):
-                return block
-
-    for block in blocks:
-        if block.get("hostname") == remote_host:
-            return block
-
-    return None
 
 
 def _ssh_config_path(config: ProjectConfig) -> Path:
@@ -126,7 +64,7 @@ def get_ssh_options(config: ProjectConfig, *, include_host_check: bool = True) -
 
     if config_path.exists():
         options.extend(["-F", str(config_path)])
-    if key_path.exists():
+    if config.connection.auth_mode != "password" and key_path.exists():
         options.extend(["-i", str(key_path)])
 
     if include_host_check and config.connection.known_hosts_check:
@@ -154,30 +92,19 @@ def update_ssh_port_in_config(new_port: str, config: ProjectConfig) -> None:
     config_path = _ssh_config_path(config)
     if not config_path.exists():
         return
-
-    lines = config_path.read_text(encoding="utf-8").splitlines(True)
-    blocks = parse_ssh_config_blocks(lines)
-    block = select_ssh_block(blocks, config.connection.host)
-    if block is None:
+    entry = read_ssh_host_entry(config_path, config.connection.host)
+    if entry is None:
         return
-
-    def line_ending(source: str) -> str:
-        if source.endswith("\r\n"):
-            return "\r\n"
-        if source.endswith("\n"):
-            return "\n"
-        return "\n"
-
-    if block["port_idx"] is not None:
-        idx = block["port_idx"]
-        indent = block["port_indent"] or ""
-        lines[idx] = f"{indent}Port {new_port}{line_ending(lines[idx])}"
-    else:
-        idx = (block["hostname_idx"] + 1) if block["hostname_idx"] is not None else block["start"] + 1
-        indent = block["hostname_indent"] or "  "
-        lines.insert(idx, f"{indent}Port {new_port}{line_ending(lines[block['start']])}")
-
-    config_path.write_text("".join(lines), encoding="utf-8")
+    upsert_ssh_host_entry(
+        config_path,
+        SSHHostEntry(
+            host=entry.host,
+            hostname=entry.hostname,
+            user=entry.user,
+            port=str(new_port),
+            identity_file=entry.identity_file,
+        ),
+    )
 
 
 def get_port_from_cpolar(config: ProjectConfig) -> str | None:
@@ -256,6 +183,18 @@ def ensure_rsync_available() -> bool:
     return shutil.which("rsync") is not None
 
 
+def _auth_prefix_and_env(config: ProjectConfig, password: str | None) -> tuple[list[str], dict[str, str] | None]:
+    if config.connection.auth_mode != "password":
+        return [], None
+    if not password:
+        raise RuntimeError("当前配置使用 password 认证，但未提供服务器密码")
+    if shutil.which("sshpass") is None:
+        raise RuntimeError("当前配置使用 password 认证，但未找到 sshpass")
+    env = os.environ.copy()
+    env["SSHPASS"] = password
+    return ["sshpass", "-e"], env
+
+
 def resolve_effective_transport(transport: str, sync_paths: tuple[str, ...]) -> str:
     if transport != "rsync":
         return transport
@@ -301,7 +240,12 @@ def normalize_sync_paths(base_dir: Path | str, raw_paths: tuple[str, ...], *, re
     return results
 
 
-def ensure_remote_directory(config: ProjectConfig, port: str, target_dir: str) -> bool:
+def ensure_remote_directory(config: ProjectConfig, port: str, target_dir: str, *, password: str | None = None) -> bool:
+    try:
+        prefix, env = _auth_prefix_and_env(config, password)
+    except RuntimeError as exc:
+        print(exc)
+        return False
     command = [
         "ssh",
         "-p",
@@ -310,7 +254,7 @@ def ensure_remote_directory(config: ProjectConfig, port: str, target_dir: str) -
         build_remote_identity(config),
         f"mkdir -p {shlex.quote(target_dir)}",
     ]
-    result = subprocess.run(command, capture_output=True)
+    result = subprocess.run(prefix + command, capture_output=True, env=env)
     if result.returncode == 0:
         return True
     print("错误: 创建远程目录失败")
@@ -341,9 +285,14 @@ def build_rsync_command(
     return command
 
 
-def run_rsync_command(command: list[str], label: str) -> bool:
+def run_rsync_command(command: list[str], label: str, *, config: ProjectConfig, password: str | None = None) -> bool:
+    try:
+        prefix, env = _auth_prefix_and_env(config, password)
+    except RuntimeError as exc:
+        print(exc)
+        return False
     for attempt in range(1, 4):
-        result = subprocess.run(command, text=True)
+        result = subprocess.run(prefix + command, text=True, env=env)
         if result.returncode == 0:
             return True
         if result.returncode in RSYNC_RETRYABLE_EXIT_CODES and attempt < 3:
@@ -452,6 +401,7 @@ def sync_upload_rsync(
     list_excluded: bool,
     sync_paths: tuple[str, ...],
     max_size_bytes: int,
+    password: str | None,
 ) -> bool:
     print(f"本地: {local_dir}")
     print(f"远程: {build_remote_identity(config)}:{remote_dir}")
@@ -465,7 +415,7 @@ def sync_upload_rsync(
         for rel_path, abs_path in selected_paths:
             remote_target = f"{remote_dir}/{rel_path}".replace("//", "/")
             remote_parent = os.path.dirname(remote_target)
-            if not ensure_remote_directory(config, port, remote_parent):
+            if not ensure_remote_directory(config, port, remote_parent, password=password):
                 return False
             command = build_rsync_command(
                 config,
@@ -474,7 +424,7 @@ def sync_upload_rsync(
                 destination=f"{build_remote_identity(config)}:{remote_parent}/",
                 excludes=(),
             )
-            if not run_rsync_command(command, f"上传 {rel_path}"):
+            if not run_rsync_command(command, f"上传 {rel_path}", config=config, password=password):
                 return False
         return True
 
@@ -492,7 +442,7 @@ def sync_upload_rsync(
         print("没有文件需要同步")
         return True
 
-    if not ensure_remote_directory(config, port, remote_dir):
+    if not ensure_remote_directory(config, port, remote_dir, password=password):
         return False
 
     command = build_rsync_command(
@@ -502,7 +452,7 @@ def sync_upload_rsync(
         destination=f"{build_remote_identity(config)}:{remote_dir}/",
         excludes=excludes,
     )
-    return run_rsync_command(command, "上传")
+    return run_rsync_command(command, "上传", config=config, password=password)
 
 
 def sync_upload_archive(
@@ -515,6 +465,7 @@ def sync_upload_archive(
     dry_run: bool,
     list_excluded: bool,
     max_size_bytes: int,
+    password: str | None,
 ) -> bool:
     files = collect_files(local_dir, excludes, max_size_bytes)
     if list_excluded:
@@ -529,7 +480,7 @@ def sync_upload_archive(
         return True
 
     remote_parent = os.path.dirname(remote_dir.rstrip("/"))
-    if not ensure_remote_directory(config, port, remote_parent):
+    if not ensure_remote_directory(config, port, remote_parent, password=password):
         return False
 
     local_temp = Path(tempfile.gettempdir()) / generate_secure_temp_name()
@@ -538,6 +489,11 @@ def sync_upload_archive(
             create_tar_archive(local_dir, files, handle, project_name=Path(remote_dir).name)
 
         remote_temp = f"/tmp/{generate_secure_temp_name()}"
+        try:
+            prefix, env = _auth_prefix_and_env(config, password)
+        except RuntimeError as exc:
+            print(exc)
+            return False
         scp_command = [
             "scp",
             "-P",
@@ -546,7 +502,7 @@ def sync_upload_archive(
             str(local_temp),
             f"{build_remote_identity(config)}:{remote_temp}",
         ]
-        result = subprocess.run(scp_command, capture_output=True)
+        result = subprocess.run(prefix + scp_command, capture_output=True, env=env)
         if result.returncode != 0:
             print(format_stderr(result.stderr))
             return False
@@ -562,7 +518,7 @@ def sync_upload_archive(
                 f"tar -xzf {shlex.quote(remote_temp)} && rm -f {shlex.quote(remote_temp)}"
             ),
         ]
-        result = subprocess.run(extract_command, capture_output=True)
+        result = subprocess.run(prefix + extract_command, capture_output=True, env=env)
         if result.returncode != 0:
             print(format_stderr(result.stderr))
             return False
@@ -583,6 +539,7 @@ def sync_upload(
     sync_paths: tuple[str, ...] = (),
     extra_excludes: tuple[str, ...] = (),
     max_size_mb: int | None = None,
+    password: str | None = None,
 ) -> bool:
     project_dir = Path(local_dir).resolve()
     transport_name = resolve_effective_transport(transport or config.sync.transport, sync_paths)
@@ -600,6 +557,7 @@ def sync_upload(
             list_excluded=list_excluded,
             sync_paths=sync_paths,
             max_size_bytes=max_size_bytes,
+            password=password,
         )
     return sync_upload_archive(
         local_dir=project_dir,
@@ -610,6 +568,7 @@ def sync_upload(
         dry_run=dry_run,
         list_excluded=list_excluded,
         max_size_bytes=max_size_bytes,
+        password=password,
     )
 
 
@@ -620,6 +579,7 @@ def download_remote_archive(
     port: str,
     output_path: Path | str,
     config: ProjectConfig,
+    password: str | None = None,
 ) -> bool:
     destination = Path(output_path).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -645,9 +605,14 @@ def download_remote_archive(
         build_remote_identity(config),
         remote_tar_command,
     ]
+    try:
+        prefix, env = _auth_prefix_and_env(config, password)
+    except RuntimeError as exc:
+        print(exc)
+        return False
 
     with destination.open("wb") as handle:
-        process = subprocess.Popen(ssh_command, stdout=handle, stderr=subprocess.PIPE)
+        process = subprocess.Popen(prefix + ssh_command, stdout=handle, stderr=subprocess.PIPE, env=env)
         _, stderr = process.communicate()
 
     if process.returncode != 0:

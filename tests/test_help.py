@@ -27,6 +27,7 @@ def test_top_level_help_mentions_both_command_names_and_examples(capsys) -> None
     assert "sr dl" in captured.out
     assert "sync-remote open" in captured.out
     assert "sr op" in captured.out
+    assert "watch (wt)" in captured.out
 
 
 def test_init_help_explains_generated_config_and_modes(capsys) -> None:
@@ -40,6 +41,8 @@ def test_init_help_explains_generated_config_and_modes(capsys) -> None:
     assert "若检测到 `.gitignore`，会自动追加配置文件名" in captured.out
     assert "auto: 自动模式，优先从 Cpolar 获取端口，失败时回退 ~/.ssh/config" in captured.out
     assert "fixed: 固定模式，直接使用配置中的固定端口，不访问 Cpolar" in captured.out
+    assert "会优先读取本机 ~/.ssh/config 中已有的 Host" in captured.out
+    assert "若没有可用 Host，可在初始化过程中创建新的 SSH 配置" in captured.out
     assert "显示当前子命令的帮助信息并退出" in captured.out
 
 
@@ -58,6 +61,7 @@ def test_upload_help_mentions_long_and_short_commands(capsys) -> None:
     assert "覆盖配置中的最大文件大小限制，单位 MB" in captured.out
     assert "临时覆盖本次连接端口，优先级高于配置和自动解析" in captured.out
     assert "不输出排除文件统计信息" in captured.out
+    assert "password 模式会在命令执行前提示输入服务器密码" in captured.out
 
 
 def test_download_help_mentions_long_and_short_commands(capsys) -> None:
@@ -88,6 +92,22 @@ def test_open_help_mentions_long_and_short_commands(capsys) -> None:
     assert "覆盖配置中的最大文件大小限制，单位 MB" in captured.out
     assert "临时覆盖本次连接端口，优先级高于配置和自动解析" in captured.out
     assert "不输出排除文件统计信息" in captured.out
+    assert "--watch" in captured.out
+    assert "上传成功并打开远端目录后，继续监听本地改动并自动同步" in captured.out
+
+
+def test_watch_help_mentions_long_and_short_commands(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["watch", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote watch" in captured.out
+    assert "可执行命令: `sync-remote watch`、`sync-remote wt`、`sr watch`、`sr wt`" in captured.out
+    assert "先执行一次上传，再持续监听当前目录变更" in captured.out
+    assert "默认防抖时间为 1000ms" in captured.out
+    assert "仅预览将要执行的上传操作，不真正传输文件" in captured.out
+    assert "--debounce-ms" in captured.out
 
 
 def test_backup_help_describes_output_defaults(capsys) -> None:
@@ -109,8 +129,8 @@ def test_status_help_describes_report_contents(capsys) -> None:
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "usage: sync-remote status" in captured.out
-    assert "显示当前生效的配置文件、SSH 目标、SSH 配置文件和公钥状态、远端目录和端口解析结果" in captured.out
-    assert "SSH 配置文件和公钥状态" in captured.out
+    assert "显示当前生效的配置文件、认证方式、SSH 目标、SSH 文件状态、远端目录和端口解析结果" in captured.out
+    assert "认证方式、SSH 配置文件、私钥、公钥和别名状态" in captured.out
     assert "适合在 upload/download/open 前先确认配置解析结果" in captured.out
 
 
@@ -121,6 +141,6 @@ def test_doctor_help_describes_checks(capsys) -> None:
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "usage: sync-remote doctor" in captured.out
-    assert "检查 ssh、rsync、code、配置文件、SSH 配置文件和公钥是否存在，以及端口解析状态" in captured.out
-    assert "SSH 配置文件和公钥是否存在" in captured.out
+    assert "检查 ssh、rsync、code、sshpass、配置文件、SSH 文件和端口解析状态" in captured.out
+    assert "SSH 配置文件、私钥、公钥、别名以及 password 模式所需的 sshpass" in captured.out
     assert "适合在首次联机前排查环境问题" in captured.out

@@ -25,6 +25,7 @@ def test_load_project_config_prefers_new_yaml(tmp_path: Path) -> None:
             "ssh_config_path": "~/.ssh/config",
             "ssh_key_path": "~/.ssh/id_ed25519",
             "known_hosts_check": True,
+            "auth_mode": "password",
         },
         "cpolar": {"tunnel_name": "", "env_path": "~/.env"},
         "sync": {"transport": "rsync", "max_file_size_mb": 50, "excludes": ["node_modules"]},
@@ -58,6 +59,7 @@ def test_load_project_config_prefers_new_yaml(tmp_path: Path) -> None:
     assert config.connection.hostname == "gpu-new.internal"
     assert config.connection.port_mode == "fixed"
     assert config.connection.port == 2222
+    assert config.connection.auth_mode == "password"
 
 
 def test_load_project_config_falls_back_to_legacy_mapping(tmp_path: Path) -> None:
@@ -93,6 +95,7 @@ def test_load_project_config_falls_back_to_legacy_mapping(tmp_path: Path) -> Non
     assert config.connection.hostname == ""
     assert config.connection.port_mode == "auto"
     assert config.connection.ssh_key_path == "~/.ssh/id_ed25519"
+    assert config.connection.auth_mode == "key"
     assert config.cpolar.tunnel_name == "my-tunnel"
 
 

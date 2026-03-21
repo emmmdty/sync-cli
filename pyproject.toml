@@ -1,6 +1,6 @@
 [project]
 name = "sync-remote"
-version = "0.2.0"
+version = "0.3.0"
 description = "CLI tool for syncing the current project directory to a remote server"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -37,3 +37,4 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--ignore-glob=tests/*.sync-conflict-*"

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import getpass
+import os
 from pathlib import Path
 import shutil
 import sys
+import time
+
+from dotenv import dotenv_values
 
 from .config import (
     DEFAULT_CONFIG_FILENAME,
@@ -20,7 +25,8 @@ from .operations import (
     default_backup_archive_path,
     default_download_archive_path,
 )
-from .transport import download_remote_archive, open_vscode_remote, resolve_connection_port, sync_upload
+from .ssh_config import read_ssh_host_entry
+from .transport import download_remote_archive, open_vscode_remote, resolve_connection_port, should_exclude_by_pattern, sync_upload
 
 
 class HelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -45,7 +51,7 @@ def _add_command_help_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_common_sync_arguments(parser: argparse.ArgumentParser, *, for_open: bool) -> None:
+def _add_common_sync_arguments(parser: argparse.ArgumentParser, *, for_open: bool, include_watch_hint: bool = False) -> None:
     dry_run_help = "仅预览将要执行的上传操作，不真正传输文件"
     if for_open:
         dry_run_help = "仅预览上传步骤，不真正传输文件，也不会打开 VS Code"
@@ -89,6 +95,19 @@ def _add_common_sync_arguments(parser: argparse.ArgumentParser, *, for_open: boo
         action="store_true",
         help="不输出排除文件统计信息",
     )
+    if include_watch_hint:
+        parser.add_argument(
+            "--watch",
+            action="store_true",
+            help="上传成功并打开远端目录后，继续监听本地改动并自动同步",
+        )
+        parser.add_argument(
+            "--debounce-ms",
+            type=int,
+            default=1000,
+            metavar="MS",
+            help="监听防抖时间，单位毫秒；默认 1000",
+        )
 
 
 def _build_parser(*, prog: str) -> argparse.ArgumentParser:
@@ -110,7 +129,9 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "  sync-remote download\n"
             "  sr dl\n"
             "  sync-remote open\n"
-            "  sr op"
+            "  sr op\n"
+            "  sync-remote watch\n"
+            "  sr wt"
         ),
         formatter_class=HelpFormatter,
     )
@@ -125,7 +146,9 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "初始化当前目录的 sync-remote.yaml\n"
             "可执行命令: `sync-remote init` 或 `sr init`\n\n"
             "运行后会在当前目录生成 `sync-remote.yaml`\n"
-            "若检测到 `.gitignore`，会自动追加配置文件名\n\n"
+            "若检测到 `.gitignore`，会自动追加配置文件名\n"
+            "会优先读取本机 ~/.ssh/config 中已有的 Host\n"
+            "若没有可用 Host，可在初始化过程中创建新的 SSH 配置\n\n"
             "端口模式:\n"
             "  auto: 自动模式，优先从 Cpolar 获取端口，失败时回退 ~/.ssh/config\n"
             "  fixed: 固定模式，直接使用配置中的固定端口，不访问 Cpolar"
@@ -151,7 +174,8 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "  - 默认使用配置文件中的 `sync.transport`；默认配置为 `rsync`\n"
             "  - 默认优先使用 rsync 进行增量上传\n"
             "  - 不删除远端额外文件\n"
-            "  - 若本机没有 rsync，会自动回退到 archive 模式"
+            "  - 若本机没有 rsync，会自动回退到 archive 模式\n"
+            "  - password 模式会在命令执行前提示输入服务器密码"
         ),
         epilog=(
             "示例:\n"
@@ -241,19 +265,53 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "示例:\n"
             "  sr op\n"
             "  sr op --dry-run\n"
-            "  sr op --sync-path src"
+            "  sr op --sync-path src\n"
+            "  sr op --watch"
         ),
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(open_command)
-    _add_common_sync_arguments(open_command, for_open=True)
+    _add_common_sync_arguments(open_command, for_open=True, include_watch_hint=True)
+
+    watch_command = subparsers.add_parser(
+        "watch",
+        aliases=["wt"],
+        add_help=False,
+        help="先上传一次，再持续监听本地变更并自动同步",
+        description=(
+            "先执行一次上传，再持续监听当前目录变更。\n"
+            "可执行命令: `sync-remote watch`、`sync-remote wt`、`sr watch`、`sr wt`\n\n"
+            "行为说明:\n"
+            "  - 启动时会先执行一次上传\n"
+            "  - 默认防抖时间为 1000ms\n"
+            "  - rsync 可用时仅同步变更路径\n"
+            "  - archive 模式下会回退为重新打包上传"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr watch\n"
+            "  sr wt --debounce-ms 1500\n"
+            "  sr wt --sync-path src"
+        ),
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(watch_command)
+    _add_common_sync_arguments(watch_command, for_open=False)
+    watch_command.add_argument(
+        "--debounce-ms",
+        type=int,
+        default=1000,
+        metavar="MS",
+        help="监听防抖时间，单位毫秒；默认 1000",
+    )
 
     status = subparsers.add_parser(
         "status",
         add_help=False,
         help="显示当前配置、远端目录和端口解析结果",
         description=(
-            "显示当前生效的配置文件、SSH 目标、SSH 配置文件和公钥状态、远端目录和端口解析结果。\n"
+            "显示当前生效的配置文件、认证方式、SSH 目标、SSH 文件状态、远端目录和端口解析结果。\n"
+            "会显示认证方式、SSH 配置文件、私钥、公钥和别名状态。\n"
             "适合在 upload/download/open 前先确认配置解析结果。"
         ),
         epilog=(
@@ -270,7 +328,8 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         add_help=False,
         help="检查本机依赖、配置文件和端口解析状态",
         description=(
-            "检查 ssh、rsync、code、配置文件、SSH 配置文件和公钥是否存在，以及端口解析状态。\n"
+            "检查 ssh、rsync、code、sshpass、配置文件、SSH 文件和端口解析状态。\n"
+            "会检查 SSH 配置文件、私钥、公钥、别名以及 password 模式所需的 sshpass。\n"
             "适合在首次联机前排查环境问题。"
         ),
         epilog=(
@@ -305,6 +364,10 @@ def _ssh_config_file(config) -> Path:
     return Path(expand_user_path(config.connection.ssh_config_path))
 
 
+def _ssh_private_key_file(config) -> Path:
+    return Path(expand_user_path(config.connection.ssh_key_path))
+
+
 def _ssh_public_key_file(config) -> Path:
     configured_key = expand_user_path(config.connection.ssh_key_path)
     if configured_key.endswith(".pub"):
@@ -324,6 +387,146 @@ def _resolve_remote_dir(config) -> str:
     )
 
 
+def _ssh_alias_status(config) -> str:
+    entry = read_ssh_host_entry(_ssh_config_file(config), config.connection.host)
+    return "OK" if entry is not None else "MISSING"
+
+
+def _cpolar_env_status(config) -> str:
+    if config.connection.port_mode != "auto":
+        return "SKIPPED (fixed mode)"
+    env_path = Path(expand_user_path(config.cpolar.env_path))
+    status = "OK" if env_path.exists() else "MISSING"
+    return f"{status} ({env_path})"
+
+
+def _cpolar_credentials_status(config) -> str:
+    if config.connection.port_mode != "auto":
+        return "SKIPPED (fixed mode)"
+    env_path = Path(expand_user_path(config.cpolar.env_path))
+    values = dict(dotenv_values(env_path)) if env_path.exists() else {}
+    username = os.environ.get("CPOLAR_USER") or values.get("CPOLAR_USER")
+    password = os.environ.get("CPOLAR_PASS") or values.get("CPOLAR_PASS")
+    status = "OK" if username and password else "MISSING"
+    return f"{status} ({env_path})"
+
+
+def _sshpass_status(config) -> str:
+    if config.connection.auth_mode != "password":
+        return "SKIPPED (key mode)"
+    resolved = shutil.which("sshpass")
+    return f"OK ({resolved})" if resolved else "MISSING"
+
+
+def _resolve_runtime_password(config) -> str | None:
+    if config.connection.auth_mode != "password":
+        return None
+    if shutil.which("sshpass") is None:
+        print("当前配置使用 password 认证，但未找到 sshpass")
+        return None
+    return getpass.getpass("服务器密码: ")
+
+
+def _perform_upload(args: argparse.Namespace, *, config, remote_dir: str, port: str, password: str | None, sync_paths: tuple[str, ...] | None = None) -> bool:
+    return sync_upload(
+        local_dir=Path.cwd(),
+        remote_dir=remote_dir,
+        port=port,
+        config=config,
+        dry_run=args.dry_run,
+        list_excluded=not args.no_list_excluded,
+        transport=args.transport,
+        sync_paths=tuple(sync_paths if sync_paths is not None else (args.sync_path or ())),
+        extra_excludes=tuple(args.exclude or ()),
+        max_size_mb=args.max_size,
+        password=password,
+    )
+
+
+def _collect_watch_snapshot(project_dir: Path, *, exclude_patterns: tuple[str, ...]) -> dict[str, tuple[int, int]]:
+    snapshot: dict[str, tuple[int, int]] = {}
+    for current_root, dirs, filenames in os.walk(project_dir, topdown=True):
+        current_path = Path(current_root)
+        dirs[:] = [
+            directory
+            for directory in dirs
+            if not should_exclude_by_pattern(current_path / directory, project_dir, exclude_patterns)
+        ]
+        for filename in filenames:
+            file_path = current_path / filename
+            if should_exclude_by_pattern(file_path, project_dir, exclude_patterns):
+                continue
+            try:
+                stat = file_path.stat()
+            except OSError:
+                continue
+            snapshot[file_path.relative_to(project_dir).as_posix()] = (stat.st_mtime_ns, stat.st_size)
+    return snapshot
+
+
+def iter_change_batches(project_dir: Path, *, exclude_patterns: tuple[str, ...], debounce_ms: int):
+    previous = _collect_watch_snapshot(project_dir, exclude_patterns=exclude_patterns)
+    interval = max(debounce_ms / 1000.0, 0.2)
+    while True:
+        time.sleep(interval)
+        current = _collect_watch_snapshot(project_dir, exclude_patterns=exclude_patterns)
+        changed = {
+            path
+            for path, state in current.items()
+            if previous.get(path) != state
+        }
+        changed.update(path for path in previous if path not in current)
+        previous = current
+        if changed:
+            yield changed
+
+
+def _restrict_watch_paths(changed_paths: set[str], selected_paths: tuple[str, ...]) -> tuple[str, ...]:
+    normalized = sorted(path for path in changed_paths)
+    if not selected_paths:
+        return tuple(normalized)
+
+    allowed = [Path(path).as_posix().rstrip("/") for path in selected_paths]
+    filtered = [
+        path
+        for path in normalized
+        if any(path == prefix or path.startswith(f"{prefix}/") for prefix in allowed)
+    ]
+    return tuple(filtered)
+
+
+def _run_watch_loop(args: argparse.Namespace, *, config, remote_dir: str, port: str, password: str | None) -> int:
+    project_dir = Path.cwd()
+    excludes = tuple(config.sync.excludes) + tuple(args.exclude or ())
+    selected_paths = tuple(Path(path).as_posix().rstrip("/") for path in (args.sync_path or ()))
+    try:
+        for changed_paths in iter_change_batches(
+            project_dir,
+            exclude_patterns=excludes,
+            debounce_ms=max(args.debounce_ms, 100),
+        ):
+            sync_paths = _restrict_watch_paths(changed_paths, selected_paths)
+            if not sync_paths:
+                continue
+            existing_sync_paths = tuple(path for path in sync_paths if (project_dir / path).exists())
+            if not existing_sync_paths and (args.transport or config.sync.transport) == "rsync":
+                print("检测到的改动仅包含删除或已不存在的路径，跳过本次同步")
+                continue
+            success = _perform_upload(
+                args,
+                config=config,
+                remote_dir=remote_dir,
+                port=port,
+                password=password,
+                sync_paths=existing_sync_paths if existing_sync_paths else (),
+            )
+            if not success:
+                print("监听同步失败，等待下一次改动...")
+    except KeyboardInterrupt:
+        print("已停止监听")
+    return 0
+
+
 def _handle_upload(args: argparse.Namespace) -> int:
     loaded = _load_config_or_report()
     if loaded is None:
@@ -338,18 +541,11 @@ def _handle_upload(args: argparse.Namespace) -> int:
         print(exc)
         return 1
 
-    success = sync_upload(
-        local_dir=Path.cwd(),
-        remote_dir=remote_dir,
-        port=port,
-        config=config,
-        dry_run=args.dry_run,
-        list_excluded=not args.no_list_excluded,
-        transport=args.transport,
-        sync_paths=tuple(args.sync_path or ()),
-        extra_excludes=tuple(args.exclude or ()),
-        max_size_mb=args.max_size,
-    )
+    password = _resolve_runtime_password(config)
+    if config.connection.auth_mode == "password" and password is None:
+        return 1
+
+    success = _perform_upload(args, config=config, remote_dir=remote_dir, port=port, password=password)
     return 0 if success else 1
 
 
@@ -367,6 +563,10 @@ def _handle_download(args: argparse.Namespace) -> int:
         print(exc)
         return 1
 
+    password = _resolve_runtime_password(config)
+    if config.connection.auth_mode == "password" and password is None:
+        return 1
+
     output_path = Path(args.output).resolve() if args.output else default_download_archive_path(
         Path.cwd(),
         current_timestamp(),
@@ -377,6 +577,7 @@ def _handle_download(args: argparse.Namespace) -> int:
         port=port,
         output_path=output_path,
         config=config,
+        password=password,
     )
     return 0 if success else 1
 
@@ -413,23 +614,44 @@ def _handle_open(args: argparse.Namespace) -> int:
         print(exc)
         return 1
 
-    success = sync_upload(
-        local_dir=Path.cwd(),
-        remote_dir=remote_dir,
-        port=port,
-        config=config,
-        dry_run=args.dry_run,
-        list_excluded=not args.no_list_excluded,
-        transport=args.transport,
-        sync_paths=tuple(args.sync_path or ()),
-        extra_excludes=tuple(args.exclude or ()),
-        max_size_mb=args.max_size,
-    )
+    password = _resolve_runtime_password(config)
+    if config.connection.auth_mode == "password" and password is None:
+        return 1
+
+    success = _perform_upload(args, config=config, remote_dir=remote_dir, port=port, password=password)
     if not success:
         return 1
     if args.dry_run:
         return 0
-    return 0 if open_vscode_remote(remote_dir=remote_dir, config=config) else 1
+    if not open_vscode_remote(remote_dir=remote_dir, config=config):
+        return 1
+    if not args.watch:
+        return 0
+    return _run_watch_loop(args, config=config, remote_dir=remote_dir, port=port, password=password)
+
+
+def _handle_watch(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, _config_path = loaded
+    remote_dir = _resolve_remote_dir(config)
+
+    try:
+        port = resolve_connection_port(config, explicit_port=args.port)
+    except RuntimeError as exc:
+        print(exc)
+        return 1
+
+    password = _resolve_runtime_password(config)
+    if config.connection.auth_mode == "password" and password is None:
+        return 1
+
+    success = _perform_upload(args, config=config, remote_dir=remote_dir, port=port, password=password)
+    if not success:
+        return 1
+    return _run_watch_loop(args, config=config, remote_dir=remote_dir, port=port, password=password)
 
 
 def _handle_status() -> int:
@@ -439,14 +661,22 @@ def _handle_status() -> int:
 
     config, config_path = loaded
     remote_dir = _resolve_remote_dir(config)
+    ssh_config = _ssh_config_file(config)
+    ssh_private_key = _ssh_private_key_file(config)
+    ssh_public_key = _ssh_public_key_file(config)
 
     print(f"配置文件: {config_path}")
+    print(f"认证方式: {config.connection.auth_mode}")
+    print(f"端口模式: {config.connection.port_mode}")
     print(f"SSH Host: {config.connection.host}")
     print(f"SSH HostName: {config.connection.hostname or '<none>'}")
-    ssh_config = _ssh_config_file(config)
-    ssh_public_key = _ssh_public_key_file(config)
     print(f"SSH 配置文件: {_path_check_status(ssh_config)} ({ssh_config})")
+    print(f"SSH 私钥: {_path_check_status(ssh_private_key)} ({ssh_private_key})")
     print(f"SSH 公钥: {_path_check_status(ssh_public_key)} ({ssh_public_key})")
+    print(f"SSH Alias: {_ssh_alias_status(config)}")
+    print(f"Cpolar 环境文件: {_cpolar_env_status(config)}")
+    print(f"Cpolar 凭证: {_cpolar_credentials_status(config)}")
+    print(f"sshpass: {_sshpass_status(config)}")
     print(f"远端目录: {remote_dir}")
     try:
         port = resolve_connection_port(config)
@@ -473,10 +703,16 @@ def _handle_doctor() -> int:
         return 1
 
     print(f"config: OK ({config_path})")
+    print(f"sshpass: {_sshpass_status(config)}")
     ssh_config = _ssh_config_file(config)
+    ssh_private_key = _ssh_private_key_file(config)
     ssh_public_key = _ssh_public_key_file(config)
     print(f"ssh_config: {_path_check_status(ssh_config)} ({ssh_config})")
+    print(f"ssh_private_key: {_path_check_status(ssh_private_key)} ({ssh_private_key})")
     print(f"ssh_public_key: {_path_check_status(ssh_public_key)} ({ssh_public_key})")
+    print(f"ssh_alias: {_ssh_alias_status(config)}")
+    print(f"cpolar_env: {_cpolar_env_status(config)}")
+    print(f"cpolar_credentials: {_cpolar_credentials_status(config)}")
     try:
         port = resolve_connection_port(config)
         print(f"port: OK ({port})")
@@ -504,6 +740,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_backup(args)
     if args.command in {"open", "op"}:
         return _handle_open(args)
+    if args.command in {"watch", "wt"}:
+        return _handle_watch(args)
     if args.command == "status":
         return _handle_status()
     if args.command == "doctor":

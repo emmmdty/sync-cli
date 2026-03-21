@@ -8,7 +8,20 @@ import sys
 from sync_remote.cli import main
 
 
-KNOWN_COMMANDS = {"init", "upload", "download", "backup", "open", "status", "doctor"}
+KNOWN_COMMANDS = {
+    "init",
+    "upload",
+    "up",
+    "download",
+    "dl",
+    "backup",
+    "open",
+    "op",
+    "watch",
+    "wt",
+    "status",
+    "doctor",
+}
 
 
 def _normalize_args(argv: list[str]) -> list[str]:

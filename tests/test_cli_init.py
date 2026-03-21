@@ -9,15 +9,40 @@ from sync_remote.cli import main
 from sync_remote.config import DEFAULT_CONFIG_FILENAME
 
 
-def test_init_writes_yaml_and_updates_gitignore(tmp_path: Path, monkeypatch) -> None:
+def _prepare_home(tmp_path: Path, *, ssh_config: str | None = None, with_keys: bool = True, key_name: str = "id_ed25519") -> Path:
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    if ssh_config is not None:
+        (ssh_dir / "config").write_text(ssh_config, encoding="utf-8")
+    if with_keys:
+        (ssh_dir / key_name).write_text("PRIVATE", encoding="utf-8")
+        (ssh_dir / f"{key_name}.pub").write_text("ssh-ed25519 AAAA test\n", encoding="utf-8")
+    return home
+
+
+def test_init_writes_yaml_updates_gitignore_and_uses_selected_ssh_host(tmp_path: Path, monkeypatch) -> None:
+    home = _prepare_home(
+        tmp_path,
+        ssh_config=(
+            "Host gpu\n"
+            "  HostName gpu.internal\n"
+            "  User alice\n"
+            "  Port 2222\n"
+            "  IdentityFile ~/.ssh/id_ed25519\n"
+        ),
+    )
     answers = iter(
         [
             "fixed",
-            "2222",
-            "alice",
-            "gpu",
-            "gpu.internal",
+            "1",
+            "",
+            "",
+            "",
+            "",
+            "",
             "/srv/work",
+            "",
         ]
     )
 
@@ -27,6 +52,7 @@ def test_init_writes_yaml_and_updates_gitignore(tmp_path: Path, monkeypatch) -> 
     gitignore_path = tmp_path / ".gitignore"
     gitignore_path.write_text("__pycache__/\n", encoding="utf-8")
 
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", fake_input)
 
@@ -34,21 +60,21 @@ def test_init_writes_yaml_and_updates_gitignore(tmp_path: Path, monkeypatch) -> 
 
     assert exit_code == 0
     config_path = tmp_path / DEFAULT_CONFIG_FILENAME
-    assert config_path.exists()
-
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert data["connection"]["port_mode"] == "fixed"
     assert data["connection"]["port"] == 2222
     assert data["connection"]["user"] == "alice"
     assert data["connection"]["host"] == "gpu"
     assert data["connection"]["hostname"] == "gpu.internal"
+    assert data["connection"]["ssh_key_path"] == "~/.ssh/id_ed25519"
+    assert data["connection"]["auth_mode"] == "key"
     assert data["project"]["remote_base_dir"] == "/srv/work"
 
     gitignore_lines = gitignore_path.read_text(encoding="utf-8").splitlines()
     assert gitignore_lines.count(DEFAULT_CONFIG_FILENAME) == 1
 
 
-def test_init_help_describes_auto_and_fixed(capsys) -> None:
+def test_init_help_describes_ssh_bootstrap_and_modes(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["init", "--help"])
 
@@ -57,14 +83,18 @@ def test_init_help_describes_auto_and_fixed(capsys) -> None:
     assert "可执行命令: `sync-remote init` 或 `sr init`" in captured.out
     assert "auto: 自动模式" in captured.out
     assert "fixed: 固定模式" in captured.out
+    assert "会优先读取本机 ~/.ssh/config 中已有的 Host" in captured.out
+    assert "若没有可用 Host，可在初始化过程中创建新的 SSH 配置" in captured.out
 
 
-def test_init_auto_uses_auto_preset_defaults(tmp_path: Path, monkeypatch) -> None:
-    answers = iter(["", "", "", "", "", "", ""])
+def test_init_auto_uses_auto_preset_defaults_and_creates_ssh_config(tmp_path: Path, monkeypatch) -> None:
+    home = _prepare_home(tmp_path, with_keys=True)
+    answers = iter(["", "", "", "", "", "", "", "", ""])
 
     def fake_input(_prompt: str = "") -> str:
         return next(answers)
 
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", fake_input)
 
@@ -79,15 +109,23 @@ def test_init_auto_uses_auto_preset_defaults(tmp_path: Path, monkeypatch) -> Non
     assert data["connection"]["hostname"] == "example.tcp.vip.cpolar.cn"
     assert data["project"]["remote_base_dir"] == "/srv/projects"
     assert data["connection"]["ssh_key_path"] == "~/.ssh/id_ed25519"
+    assert data["connection"]["auth_mode"] == "key"
     assert data["cpolar"]["tunnel_name"] == "my-tunnel"
+
+    ssh_config = (home / ".ssh" / "config").read_text(encoding="utf-8")
+    assert "Host cpolar-server" in ssh_config
+    assert "HostName example.tcp.vip.cpolar.cn" in ssh_config
+    assert "IdentityFile ~/.ssh/id_ed25519" in ssh_config
 
 
 def test_init_fixed_uses_fixed_preset_defaults(tmp_path: Path, monkeypatch) -> None:
-    answers = iter(["fixed", "", "", "", "", "", ""])
+    home = _prepare_home(tmp_path, with_keys=True)
+    answers = iter(["fixed", "", "", "", "", "", "", "", ""])
 
     def fake_input(_prompt: str = "") -> str:
         return next(answers)
 
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", fake_input)
 
@@ -102,3 +140,91 @@ def test_init_fixed_uses_fixed_preset_defaults(tmp_path: Path, monkeypatch) -> N
     assert data["connection"]["hostname"] == "example.com"
     assert data["project"]["remote_base_dir"] == "/srv/projects"
     assert data["connection"]["ssh_key_path"] == "~/.ssh/id_ed25519"
+    assert data["connection"]["auth_mode"] == "key"
+
+
+def test_init_creates_ssh_config_and_can_switch_to_password_mode_when_keys_are_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = _prepare_home(tmp_path, with_keys=False)
+    answers = iter(
+        [
+            "fixed",
+            "2222",
+            "alice",
+            "gpu",
+            "gpu.internal",
+            "",
+            "/srv/work",
+            "n",
+            "password",
+        ]
+    )
+
+    def fake_input(_prompt: str = "") -> str:
+        return next(answers)
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    exit_code = main(["init"])
+
+    assert exit_code == 0
+    data = yaml.safe_load((tmp_path / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert data["connection"]["auth_mode"] == "password"
+    ssh_config = (home / ".ssh" / "config").read_text(encoding="utf-8")
+    assert "Host gpu" in ssh_config
+    assert "HostName gpu.internal" in ssh_config
+    assert "User alice" in ssh_config
+    assert "Port 2222" in ssh_config
+    assert "IdentityFile ~/.ssh/id_ed25519" in ssh_config
+
+
+def test_init_can_generate_missing_keypair(tmp_path: Path, monkeypatch) -> None:
+    home = _prepare_home(tmp_path, with_keys=False)
+    answers = iter(
+        [
+            "fixed",
+            "2222",
+            "alice",
+            "gpu",
+            "gpu.internal",
+            "",
+            "/srv/work",
+            "y",
+            "",
+        ]
+    )
+    calls: list[list[str]] = []
+
+    def fake_input(_prompt: str = "") -> str:
+        return next(answers)
+
+    def fake_run(command: list[str], check: bool = False, **_kwargs):
+        calls.append(command)
+        private_key = home / ".ssh" / "id_ed25519"
+        public_key = home / ".ssh" / "id_ed25519.pub"
+        private_key.write_text("PRIVATE", encoding="utf-8")
+        public_key.write_text("ssh-ed25519 AAAA test\n", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+
+        return Result()
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", fake_input)
+    monkeypatch.setattr("sync_remote.config.subprocess.run", fake_run)
+
+    exit_code = main(["init"])
+
+    assert exit_code == 0
+    assert calls
+    assert calls[0][0] == "ssh-keygen"
+    assert (home / ".ssh" / "id_ed25519").exists()
+    assert (home / ".ssh" / "id_ed25519.pub").exists()
+    data = yaml.safe_load((tmp_path / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert data["connection"]["auth_mode"] == "key"
