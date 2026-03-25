@@ -578,7 +578,7 @@ def test_update_delegates_to_self_update_runner(monkeypatch, capsys) -> None:
 
     def fake_run_self_update(*, channel: str | None):
         recorded["channel"] = channel
-        return True, "已更新到 release 0.4.0"
+        return True, "已更新到 release 0.4.1"
 
     monkeypatch.setattr("sync_remote.cli.run_self_update", fake_run_self_update)
 
@@ -587,4 +587,4 @@ def test_update_delegates_to_self_update_runner(monkeypatch, capsys) -> None:
     assert exit_code == 0
     assert recorded["channel"] == "release"
     captured = capsys.readouterr()
-    assert "已更新到 release 0.4.0" in captured.out
+    assert "已更新到 release 0.4.1" in captured.out

@@ -60,6 +60,7 @@ def test_upload_help_mentions_long_and_short_commands(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote upload" in captured.out
     assert "可执行命令: `sync-remote upload`、`sync-remote up`、`sr upload`、`sr up`" in captured.out
+    assert "默认作用于配置文件中的当前默认服务器" in captured.out
     assert "默认使用配置文件中的 `sync.transport`；默认配置为 `rsync`" in captured.out
     assert "仅预览将要执行的上传操作，不真正传输文件" in captured.out
     assert "只同步指定的文件或目录；需要本机安装 rsync" in captured.out
@@ -78,6 +79,7 @@ def test_download_help_mentions_long_and_short_commands(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote download" in captured.out
     assert "可执行命令: `sync-remote download`、`sync-remote dl`、`sr download`、`sr dl`" in captured.out
+    assert "默认作用于配置文件中的当前默认服务器" in captured.out
     assert "默认保存在当前目录，文件名为 `<项目名>-时间戳.tar.gz`" in captured.out
     assert "临时覆盖本次连接端口，优先级高于配置和自动解析" in captured.out
     assert "自定义输出压缩包路径；默认输出到当前目录" in captured.out
@@ -91,6 +93,7 @@ def test_open_help_mentions_long_and_short_commands(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote open" in captured.out
     assert "可执行命令: `sync-remote open`、`sync-remote op`、`sr open`、`sr op`" in captured.out
+    assert "默认作用于配置文件中的当前默认服务器" in captured.out
     assert "先执行一次 upload 逻辑" in captured.out
     assert "仅预览上传步骤，不真正传输文件，也不会打开 VS Code" in captured.out
     assert "只同步指定的文件或目录；需要本机安装 rsync" in captured.out
@@ -110,6 +113,7 @@ def test_watch_help_mentions_long_and_short_commands(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote watch" in captured.out
     assert "可执行命令: `sync-remote watch`、`sync-remote wt`、`sr watch`、`sr wt`" in captured.out
+    assert "默认作用于配置文件中的当前默认服务器" in captured.out
     assert "先执行一次上传，再持续监听当前目录变更" in captured.out
     assert "默认防抖时间为 1000ms" in captured.out
     assert "仅预览将要执行的上传操作，不真正传输文件" in captured.out
@@ -136,6 +140,7 @@ def test_status_help_describes_report_contents(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote status" in captured.out
     assert "显示当前默认服务器、生效配置、SSH 目标、SSH 文件状态、远端目录和端口解析结果" in captured.out
+    assert "服务器列表、认证方式" in captured.out
     assert "认证方式、SSH 配置文件、私钥、公钥和别名状态" in captured.out
     assert "适合在 upload/download/open 前先确认配置解析结果" in captured.out
 
@@ -161,6 +166,7 @@ def test_switch_help_describes_default_host_switching(capsys) -> None:
     assert "usage: sync-remote switch" in captured.out
     assert "切换当前项目默认使用的服务器" in captured.out
     assert "不传时会列出已配置服务器供选择" in captured.out
+    assert "若传入不存在的 host，会提示后回退到选择列表" in captured.out
 
 
 def test_del_help_describes_host_removal(capsys) -> None:
@@ -171,6 +177,7 @@ def test_del_help_describes_host_removal(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote del" in captured.out
     assert "删除当前项目中的一个服务器配置" in captured.out
+    assert "若传入不存在的 host，会提示后回退到选择列表" in captured.out
     assert "若删除默认服务器，会自动把最后一个剩余服务器设为默认" in captured.out
 
 
@@ -193,6 +200,7 @@ def test_version_help_describes_current_version_output(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote version" in captured.out
     assert "显示当前安装版本号" in captured.out
+    assert "0.4.1-main-YYYY-MM-DD" in captured.out
 
 
 def test_update_help_describes_channels(capsys) -> None:
@@ -203,4 +211,5 @@ def test_update_help_describes_channels(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote update" in captured.out
     assert "--channel {main,release}" in captured.out
+    assert "仅支持通过 `uv tool install` 安装的命令进行自动更新" in captured.out
     assert "默认优先使用最新 Release" in captured.out

@@ -34,36 +34,34 @@ def test_repository_has_readme_license_and_gitignore() -> None:
 
     assert "# sync-remote" in readme_content
     assert "远程同步命令行工具" in readme_content
-    assert "## 适用群体" in readme_content
-    assert "需要在本地项目目录和远端服务器目录之间高频同步代码" in readme_content
-    assert "远端 SSH 端口会变化" in readme_content
-    assert "不想手动维护 SSH 配置、密钥或实时同步脚本" in readme_content
-    assert "## 新电脑首次使用准备" in readme_content
+    assert "## 适用场景" in readme_content
+    assert "需要在本地项目目录和远端开发机之间高频同步代码" in readme_content
+    assert "同一份项目配置里切换默认目标或批量上传" in readme_content
+    assert "远端 SSH 端口可能通过 Cpolar 等隧道动态变化" in readme_content
+    assert "## 首次使用前准备" in readme_content
     assert "Python 3.10+" in readme_content
-    assert "如果要使用 `open`，需要安装 VS Code 和 `code` 命令" in readme_content
-    assert "如果使用 `auto` 端口模式，还需要准备 Cpolar 账号" in readme_content
-    assert "### 如果缺少配置，怎么补" in readme_content
-    assert "ssh-keygen -t ed25519" in readme_content
-    assert "ssh-copy-id user@hostname" in readme_content
-    assert "Host remote-server" in readme_content
-    assert "如果本机已有 `~/.ssh/config`，`sr init` 会自动列出可选 Host" in readme_content
-    assert "sr up --transport archive" in readme_content
-    assert "`password` 模式需要本机安装 `sshpass`" in readme_content
-    assert "CPOLAR_USER=你的账号" in readme_content
+    assert "使用 `open` 时需要 VS Code 和 `code` 命令" in readme_content
+    assert "使用 `auto` 端口模式时需要准备含 `CPOLAR_USER` 和 `CPOLAR_PASS` 的环境变量文件" in readme_content
     assert "uv tool install ." in readme_content
-    assert "sync-remote init" in readme_content
+    assert "sr init" in readme_content
     assert "sr up" in readme_content
+    assert "sr switch gpu-b" in readme_content
+    assert "sr upload-all-gpu" in readme_content
+    assert "sr version" in readme_content
+    assert "sr update --channel release" in readme_content
     assert "sr watch" in readme_content
     assert "sync-remote open --watch" in readme_content
-    assert "适合通过 Cpolar 等隧道暴露 SSH，且公网端口经常变化的场景" in readme_content
-    assert "## 配置示例" in readme_content
+    assert "旧版单服务器配置仍可读取，但新的写回结构统一是 `version: 2`" in readme_content
+    assert "### `version: 2` 多服务器示例" in readme_content
+    assert "default_host: gpu-b" in readme_content
+    assert "servers:" in readme_content
     assert "port_mode: auto" in readme_content
     assert "hostname: example.tcp.vip.cpolar.cn" in readme_content
-    assert "auth_mode: key" in readme_content
-    assert "端口: 45678" in readme_content
-    assert "host: remote-server" in readme_content
-    assert "`sync_to_remote.py` 只是兼容包装层" in readme_content
-    assert "它会把旧调用方式转发到新的 `sync-remote` CLI" in readme_content
+    assert "auth_mode: password" in readme_content
+    assert "Host gpu-a" in readme_content
+    assert "Host gpu-b" in readme_content
+    assert "`update` 只支持通过 `uv tool install` 或 `uv tool install --editable` 安装的命令自动更新" in readme_content
+    assert "它本身只是兼容包装层，会把旧调用方式转发到新的 `sync-remote` CLI" in readme_content
     assert "MIT" in readme_content
 
     assert "MIT License" in license_content

@@ -1,33 +1,27 @@
 # sync-remote
 
-远程同步命令行工具，用来把当前项目目录同步到远端服务器，并提供下载、备份、环境检查、实时同步和 VS Code Remote 打开能力。
+远程同步命令行工具，用来把当前项目目录同步到远端服务器，并提供下载、备份、环境检查、实时同步、VS Code Remote 打开和自更新能力。
 
-项目主命令是 `sync-remote`，同时提供简写命令 `sr`。
+主命令是 `sync-remote`，同时提供简写别名 `sr`。
 
-## 适用群体
+## 适用场景
 
-这个工具主要适合以下用户：
-
-- 需要在本地项目目录和远端服务器目录之间高频同步代码的开发者
-- 已经通过 SSH / VS Code Remote SSH 连接远端机器，希望把日常同步操作命令化的用户
-- 远端 SSH 端口会变化，希望工具能自动获取最新端口并继续工作的用户
-- 希望在任意目录快速初始化同步配置，而不是把脚本复制到每个项目目录中的用户
-- 不想手动维护 SSH 配置、密钥或实时同步脚本，希望由工具一次性引导完成的用户
-- 需要同时具备上传、下载、备份、自检和远端打开能力的小型团队或个人开发者
+- 需要在本地项目目录和远端开发机之间高频同步代码
+- 已经使用 SSH 或 VS Code Remote SSH，希望把日常同步流程命令化
+- 同时维护多台服务器，希望在同一份项目配置里切换默认目标或批量上传
+- 远端 SSH 端口可能通过 Cpolar 等隧道动态变化
+- 希望在任意项目目录里快速初始化配置，而不是复制脚本到每个仓库
 
 ## 功能特性
 
-- 在任意目录生成本地配置文件 `sync-remote.yaml`
-- `init` 时自动读取本机 `~/.ssh/config`，可直接选择已有 Host 或新增 Host
-- 缺少 SSH 配置、私钥或公钥时可在初始化流程中补齐
-- 增量上传当前目录到远端目录
-- 适合通过 Cpolar 等隧道暴露 SSH，且公网端口经常变化的场景
+- `init` 会生成或更新当前目录的 `sync-remote.yaml`
+- 已有配置时再次执行 `init` 会追加服务器，并把新服务器设为默认值
+- 支持 `switch`、`del`、`status` 管理多服务器配置
+- `upload`、`download`、`open`、`watch`、`doctor` 默认都作用于当前默认服务器
+- `upload-all-gpu` 可按顺序上传到配置中的所有服务器，失败不会中断后续任务
 - 支持 `key` 和 `password` 两种认证模式
-- 将远端目录打包下载为 `tar.gz`
-- 将当前目录备份到上级目录
-- 支持 `watch` 与 `open --watch`，可持续监听本地改动并自动同步
-- 上传后直接用 VS Code Remote SSH 打开远端目录
-- 检查依赖、配置、SSH 配置文件、私钥、公钥、sshpass 和端口解析状态
+- 支持 `auto` 和 `fixed` 两种 SSH 端口模式
+- 支持 `version` 查看当前版本，`update` 从 GitHub 自更新
 - 兼容旧入口 `sync_to_remote.py`
 
 ## 安装
@@ -40,8 +34,6 @@ uv tool install .
 
 ### 开发态安装
 
-源码会实时生效，适合持续开发这个工具：
-
 ```bash
 uv tool install --editable .
 ```
@@ -53,26 +45,24 @@ uv run sync-remote --help
 uv run sr --help
 ```
 
-## 新电脑首次使用准备
+## 首次使用前准备
 
-在一台新电脑上首次使用本工具，建议先确认下面这些准备项。
-
-### 必须准备
+必须准备：
 
 - `Python 3.10+`
 - `uv`
 - `ssh`
 - 本机 SSH 私钥和公钥
-- 远端服务器已添加你的 SSH 公钥
+- 远端服务器已写入你的公钥
 
-### 按需准备
+按需准备：
 
-- 如果要使用 `open`，需要安装 VS Code 和 `code` 命令
-- 如果希望获得更好的增量上传体验，建议安装 `rsync`
-- 如果要使用 `password` 模式，需要本机安装 `sshpass`
-- 如果使用 `auto` 端口模式，还需要准备 Cpolar 账号，以及包含 `CPOLAR_USER` 和 `CPOLAR_PASS` 的环境变量文件
+- 使用 `open` 时需要 VS Code 和 `code` 命令
+- 希望获得更好的增量上传体验时建议安装 `rsync`
+- 使用 `password` 认证模式时需要安装 `sshpass`
+- 使用 `auto` 端口模式时需要准备含 `CPOLAR_USER` 和 `CPOLAR_PASS` 的环境变量文件
 
-### 推荐首次检查顺序
+推荐首次检查顺序：
 
 ```bash
 sr --help
@@ -81,136 +71,62 @@ sr doctor
 sr status
 ```
 
-如果 `doctor` 里出现缺失项，先补齐本机依赖、SSH 配置、公钥或端口解析环境，再执行 `sr up`。
-
-### 如果缺少配置，怎么补
-
-如果本机已有 `~/.ssh/config`，`sr init` 会自动列出可选 Host，你可以直接复用，也可以选择“新增 Host”生成一条新的 SSH 配置。
-
-#### 1. 没有 SSH 密钥
-
-先在本机生成一对新的 SSH 密钥：
-
-```bash
-ssh-keygen -t ed25519 -C "your_email@example.com"
-```
-
-生成后，默认会得到：
-
-- `~/.ssh/id_ed25519`
-- `~/.ssh/id_ed25519.pub`
-
-#### 2. 远端服务器还没有你的公钥
-
-如果远端已经能通过密码登录，可以直接执行：
-
-```bash
-ssh-copy-id user@hostname
-```
-
-如果没有 `ssh-copy-id`，也可以手动把公钥内容追加到远端的 `~/.ssh/authorized_keys`。
-
-#### 3. 没有 `~/.ssh/config`
-
-可以自己创建一个最小配置，例如：
-
-```sshconfig
-Host remote-server
-  HostName example.com
-  User user
-  Port 22
-  IdentityFile ~/.ssh/id_ed25519
-```
-
-保存后可以先验证：
-
-```bash
-ssh remote-server
-```
-
-#### 4. 没有 `code` 命令
-
-如果要使用 `sr op` 或 `sync-remote open`，需要让 VS Code 的命令行可用。
-
-常见做法是在 VS Code 里打开命令面板，然后执行：
-
-```text
-Shell Command: Install 'code' command in PATH
-```
-
-#### 5. 没有 `rsync`
-
-没有 `rsync` 时，工具会自动回退到 `archive` 模式，但 `--sync-path` 这类精细同步能力会受限。
-
-如果当前机器暂时没有 `rsync`，仍然可以这样用：
-
-```bash
-sr up --transport archive
-```
-
-#### 5.1 没有 `sshpass`
-
-如果你准备使用 `password` 认证模式，需要先安装 `sshpass`，否则 `upload`、`download`、`watch` 会在执行前直接报缺失。
-
-`password` 模式需要本机安装 `sshpass`，并且密码只会在命令运行时输入，不会写入 `sync-remote.yaml`。
-
-#### 6. 没有 Cpolar 环境变量文件
-
-如果你要用 `auto` 端口模式，需要准备一个环境变量文件，例如 `~/.env`：
-
-```bash
-CPOLAR_USER=你的账号
-CPOLAR_PASS=你的密码
-```
-
-然后在 `sr init` 时选择 `auto`，并把环境变量文件路径填成 `~/.env`。
-
-如果你没有 Cpolar，或者不想依赖动态端口解析，可以直接在初始化时选择 `fixed` 模式，手动填写 SSH 端口。
-
 ## 快速开始
 
-1. 初始化当前目录配置：
+1. 初始化或追加当前目录的服务器配置：
 
 ```bash
-sync-remote init
+sr init
 ```
 
-2. 检查本机环境和配置解析结果：
+2. 检查默认服务器和本机依赖：
 
 ```bash
-sync-remote doctor
-sync-remote status
+sr status
+sr doctor
 ```
 
-3. 增量上传当前目录：
+3. 上传到当前默认服务器：
 
 ```bash
-sync-remote upload
+sr up
 ```
 
-4. 上传后打开远端目录：
+4. 切换默认服务器后再次上传：
 
 ```bash
-sync-remote open
+sr switch gpu-b
+sr up
 ```
 
-5. 持续监听并自动同步：
+5. 上传到所有已配置服务器：
 
 ```bash
-sr watch
-sync-remote open --watch
+sr upload-all-gpu
+```
+
+6. 查看版本并按 Release 通道更新：
+
+```bash
+sr version
+sr update --channel release
 ```
 
 ## 命令一览
 
 | 功能 | 长命令 | 简写 |
 | --- | --- | --- |
-| 初始化配置 | `sync-remote init` | `sr init` |
+| 初始化或追加服务器 | `sync-remote init` | `sr init` |
 | 上传 | `sync-remote upload` | `sr up` |
 | 下载 | `sync-remote download` | `sr dl` |
 | 备份 | `sync-remote backup` | `sr backup` |
 | 打开远端目录 | `sync-remote open` | `sr op` |
 | 实时同步 | `sync-remote watch` | `sr wt` |
+| 切换默认服务器 | `sync-remote switch` | `sr switch` |
+| 删除服务器 | `sync-remote del` | `sr del` |
+| 上传到所有服务器 | `sync-remote upload-all-gpu` | `sr upload-all-gpu` |
+| 查看版本 | `sync-remote version` | `sr version` |
+| 自动更新 | `sync-remote update` | `sr update` |
 | 查看配置状态 | `sync-remote status` | `sr status` |
 | 环境自检 | `sync-remote doctor` | `sr doctor` |
 
@@ -219,30 +135,26 @@ sync-remote open --watch
 ```bash
 sync-remote --help
 sync-remote upload --help
-sync-remote download --help
-sync-remote open --help
+sync-remote switch --help
+sync-remote update --help
 ```
 
 ## 配置说明
 
-运行 `sync-remote init` 后，会在当前目录生成 `sync-remote.yaml`。
+运行 `sync-remote init` 后，会在当前目录生成或更新 `sync-remote.yaml`。
 
-初始化流程会优先扫描本机 `~/.ssh/config`：
+- `init` 会优先扫描本机 `~/.ssh/config`，可直接复用已有 Host，也可在流程中新增 Host
+- 如果当前目录已经有配置，再次执行 `init` 会追加新的服务器，并把最后追加的 Host 设为 `default_host`
+- `upload`、`download`、`open`、`watch`、`doctor` 都读取 `default_host`
+- `switch` 只切换默认服务器，不改其他配置
+- `del` 删除指定服务器；删除默认服务器时，会把最后一个剩余服务器设为默认
+- 读取顺序是 `sync-remote.yaml` 优先，找不到时回退到旧配置 `sync_config.yaml`
+- 旧版单服务器配置仍可读取，但新的写回结构统一是 `version: 2`
 
-- 如果已有可用 Host，可直接选择并复用现有 `HostName`、`User`、`Port` 和 `IdentityFile`
-- 如果没有合适的 Host，可以在初始化过程中直接新增一条 SSH 配置
-- 如果缺少私钥或公钥，工具会提示是否自动生成新的 `ed25519` 密钥对
-- 如果暂时不使用密钥，也可以把认证方式切换为 `password`
-
-配置读取顺序：
-
-1. 优先读取 `sync-remote.yaml`
-2. 若不存在，则回退读取旧配置 `sync_config.yaml`
-
-端口模式说明：
+端口模式：
 
 - `auto`：优先从 Cpolar 获取端口，失败时回退 `~/.ssh/config`
-- `fixed`：直接使用配置中的固定端口
+- `fixed`：直接使用配置中的固定端口，不访问 Cpolar
 
 远端目录默认由两部分组成：
 
@@ -255,100 +167,79 @@ sync-remote open --help
 /srv/projects/demo-project
 ```
 
-## 配置示例
-
-下面给出两种常见配置示例，方便在新电脑上快速对照填写。
-
-### `auto` 模式示例
-
-适合通过 Cpolar 一类隧道暴露 SSH，公网端口会变化的场景。
-
-对应的 `sync-remote.yaml` 可以长这样：
+### `version: 2` 多服务器示例
 
 ```yaml
-version: 1
+version: 2
 project:
   remote_base_dir: /srv/projects
   append_project_dir: true
-connection:
-  user: user
-  host: cpolar-server
-  hostname: example.tcp.vip.cpolar.cn
-  port_mode: auto
-  port: null
-  ssh_config_path: ~/.ssh/config
-  ssh_key_path: ~/.ssh/id_ed25519
-  known_hosts_check: true
-  auth_mode: key
-cpolar:
-  tunnel_name: my-tunnel
-  env_path: ~/.env
+default_host: gpu-b
+servers:
+  gpu-a:
+    user: alice
+    host: gpu-a
+    hostname: gpu-a.internal
+    port_mode: fixed
+    port: 2222
+    ssh_config_path: ~/.ssh/config
+    ssh_key_path: ~/.ssh/id_ed25519
+    known_hosts_check: true
+    auth_mode: key
+    cpolar:
+      tunnel_name: ""
+      env_path: ~/.env
+  gpu-b:
+    user: bob
+    host: gpu-b
+    hostname: example.tcp.vip.cpolar.cn
+    port_mode: auto
+    port: null
+    ssh_config_path: ~/.ssh/config
+    ssh_key_path: ~/.ssh/id_ed25519
+    known_hosts_check: true
+    auth_mode: password
+    cpolar:
+      tunnel_name: prod-tunnel
+      env_path: ~/.env.prod
 sync:
   transport: rsync
   max_file_size_mb: 50
+  excludes:
+    - .git
+    - .venv
 backup:
   excludes:
     - .git
+    - .venv
 ```
 
-对应的 Cpolar 环境变量文件例如：
+上面这份配置里：
 
-```bash
-CPOLAR_USER=你的账号
-CPOLAR_PASS=你的密码
-```
+- `sr up`、`sr status`、`sr doctor` 默认都会走 `gpu-b`
+- `sr switch gpu-a` 会把默认服务器切到 `gpu-a`
+- `sr del gpu-b` 会删除 `gpu-b` 并把剩余服务器设为默认
+- `sr upload-all-gpu` 会依次上传到 `gpu-a` 和 `gpu-b`
 
-在这个模式下，端口不是写死在配置里的，而是运行时自动解析。  
-例如某次 `status` 里可能会看到解析结果：
-
-```text
-SSH HostName: example.tcp.vip.cpolar.cn
-端口: 45678
-```
-
-### `fixed` 模式示例
-
-适合远端 SSH 端口固定、你已经明确知道 `hostname` 和 `port` 的场景。
-
-```yaml
-version: 1
-project:
-  remote_base_dir: /srv/projects
-  append_project_dir: true
-connection:
-  user: user
-  host: remote-server
-  hostname: example.com
-  port_mode: fixed
-  port: 22
-  ssh_config_path: ~/.ssh/config
-  ssh_key_path: ~/.ssh/id_ed25519
-  known_hosts_check: true
-  auth_mode: key
-cpolar:
-  tunnel_name: my-tunnel
-  env_path: ~/.env
-sync:
-  transport: rsync
-  max_file_size_mb: 50
-backup:
-  excludes:
-    - .git
-```
-
-如果你同时维护 `~/.ssh/config`，可以对应写成：
+如果你同时维护 `~/.ssh/config`，可写成：
 
 ```sshconfig
-Host remote-server
-  HostName example.com
-  User user
+Host gpu-a
+  HostName gpu-a.internal
+  User alice
+  Port 2222
+  IdentityFile ~/.ssh/id_ed25519
+
+Host gpu-b
+  HostName example.tcp.vip.cpolar.cn
+  User bob
   Port 22
   IdentityFile ~/.ssh/id_ed25519
 ```
 
 ## 典型工作流
 
-### 日常同步
+### 上传到默认服务器
 
 ```bash
 sr up
@@ -360,16 +251,24 @@ sr up
 sr up --dry-run
 ```
 
+### 切换默认服务器
+
+```bash
+sr switch
+sr switch gpu-a
+```
+
+### 删除某台服务器
+
+```bash
+sr del
+sr del gpu-b
+```
+
 ### 下载远端快照
 
 ```bash
 sr dl
-```
-
-### 备份当前目录
-
-```bash
-sr backup
 ```
 
 ### 上传后打开远端目录
@@ -382,21 +281,32 @@ sr op
 
 ```bash
 sr watch
-```
-
-### 打开远端目录并持续同步
-
-```bash
 sync-remote open --watch
 ```
 
+### 批量上传到所有服务器
+
+```bash
+sr upload-all-gpu
+```
+
+### 查看版本并自更新
+
+```bash
+sr version
+sr update
+sr update --channel main
+sr update --channel release
+```
+
+`update` 只支持通过 `uv tool install` 或 `uv tool install --editable` 安装的命令自动更新。  
+如果当前是仓库内 `uv run`、源码直接执行或其他安装方式，命令会给出手动更新指令，不会原地改写当前源码目录。
+
 ## 兼容旧入口
 
-仓库仍保留 `sync_to_remote.py`，但它本身已经不是主要入口。
+仓库仍保留 `sync_to_remote.py`，但它本身只是兼容包装层，会把旧调用方式转发到新的 `sync-remote` CLI。
 
-`sync_to_remote.py` 只是兼容包装层。它会把旧调用方式转发到新的 `sync-remote` CLI，这样以前习惯直接运行脚本的用户不需要立刻改命令。
-
-推荐直接使用新的正式入口：
+推荐直接使用：
 
 - `sync-remote`
 - `sr`
@@ -406,6 +316,7 @@ sync-remote open --watch
 ```bash
 python sync_to_remote.py
 python sync_to_remote.py upload
+python sync_to_remote.py switch gpu-b
 ```
 
 ## 开发与测试
@@ -413,7 +324,7 @@ python sync_to_remote.py upload
 安装开发依赖：
 
 ```bash
-uv sync --group dev
+uv sync --locked --group dev
 ```
 
 运行测试：

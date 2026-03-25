@@ -130,8 +130,12 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "  sync-remote upload --dry-run\n"
             "  sr upload\n"
             "  sr up\n"
+            "  sr switch gpu-b\n"
             "  sync-remote download\n"
             "  sr dl\n"
+            "  sr upload-all-gpu\n"
+            "  sr version\n"
+            "  sr update --channel release\n"
             "  sync-remote open\n"
             "  sr op\n"
             "  sync-remote watch\n"
@@ -145,7 +149,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser(
         "init",
         add_help=False,
-        help="新增一个服务器到当前目录的 sync-remote.yaml 配置文件",
+        help="生成或追加当前目录的 sync-remote.yaml 配置",
         description=(
             "初始化当前目录的 sync-remote.yaml\n"
             "可执行命令: `sync-remote init` 或 `sr init`\n\n"
@@ -176,6 +180,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "增量上传当前目录到远端目录。\n"
             "可执行命令: `sync-remote upload`、`sync-remote up`、`sr upload`、`sr up`\n\n"
             "行为说明:\n"
+            "  - 默认作用于配置文件中的当前默认服务器\n"
             "  - 默认使用配置文件中的 `sync.transport`；默认配置为 `rsync`\n"
             "  - 默认优先使用 rsync 进行增量上传\n"
             "  - 不删除远端额外文件\n"
@@ -203,6 +208,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "将远端目录打包下载到当前目录。\n"
             "可执行命令: `sync-remote download`、`sync-remote dl`、`sr download`、`sr dl`\n\n"
             "行为说明:\n"
+            "  - 默认作用于配置文件中的当前默认服务器\n"
             "  - 下载结果为 tar.gz 压缩包\n"
             "  - 默认保存在当前目录，文件名为 `<项目名>-时间戳.tar.gz`\n"
             "  - 不会自动解压到本地目录"
@@ -261,6 +267,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "先增量上传当前目录，再通过 VS Code Remote SSH 打开远端目录。\n"
             "可执行命令: `sync-remote open`、`sync-remote op`、`sr open`、`sr op`\n\n"
             "行为说明:\n"
+            "  - 默认作用于配置文件中的当前默认服务器\n"
             "  - 先执行一次 upload 逻辑\n"
             "  - `--dry-run` 时仅预览上传步骤，不真正传输文件，也不会打开 VS Code\n"
             "  - 上传成功后再调用 VS Code 打开远端目录\n"
@@ -287,6 +294,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "先执行一次上传，再持续监听当前目录变更。\n"
             "可执行命令: `sync-remote watch`、`sync-remote wt`、`sr watch`、`sr wt`\n\n"
             "行为说明:\n"
+            "  - 默认作用于配置文件中的当前默认服务器\n"
             "  - 启动时会先执行一次上传\n"
             "  - 默认防抖时间为 1000ms\n"
             "  - rsync 可用时仅同步变更路径\n"
@@ -320,6 +328,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "行为说明:\n"
             "  - 可直接传入 host 别名\n"
             "  - 不传时会列出已配置服务器供选择\n"
+            "  - 若传入不存在的 host，会提示后回退到选择列表\n"
             "  - 切换后会更新配置中的默认服务器"
         ),
         epilog=(
@@ -342,6 +351,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "行为说明:\n"
             "  - 可直接传入 host 别名\n"
             "  - 不传时会列出已配置服务器供选择\n"
+            "  - 若传入不存在的 host，会提示后回退到选择列表\n"
             "  - 若删除默认服务器，会自动把最后一个剩余服务器设为默认"
         ),
         epilog=(
@@ -382,7 +392,8 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         help="显示当前安装版本号",
         description=(
             "显示当前安装版本号。\n"
-            "可执行命令: `sync-remote version` 或 `sr version`"
+            "可执行命令: `sync-remote version` 或 `sr version`\n\n"
+            "若当前安装来自 main 通道，会显示类似 `0.4.1-main-YYYY-MM-DD` 的展示版本。"
         ),
         formatter_class=HelpFormatter,
     )
@@ -396,6 +407,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "从 GitHub 更新当前工具版本。\n"
             "可执行命令: `sync-remote update` 或 `sr update`\n\n"
             "行为说明:\n"
+            "  - 仅支持通过 `uv tool install` 安装的命令进行自动更新\n"
             "  - 默认优先使用最新 Release\n"
             "  - 若最新 Release/Tag 版本低于当前基线版本，则自动切换到 main\n"
             "  - 支持显式指定 `main` 或 `release` 通道"
@@ -416,7 +428,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         help="显示当前配置、远端目录和端口解析结果",
         description=(
             "显示当前默认服务器、生效配置、SSH 目标、SSH 文件状态、远端目录和端口解析结果。\n"
-            "会显示认证方式、SSH 配置文件、私钥、公钥和别名状态。\n"
+            "会显示服务器列表、认证方式、SSH 配置文件、私钥、公钥和别名状态。\n"
             "适合在 upload/download/open 前先确认配置解析结果。"
         ),
         epilog=(
@@ -434,7 +446,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         help="检查本机依赖、配置文件和端口解析状态",
         description=(
             "检查 ssh、rsync、code、sshpass、配置文件、SSH 文件和端口解析状态。\n"
-            "会检查 SSH 配置文件、私钥、公钥、别名以及 password 模式所需的 sshpass。\n"
+            "会检查当前默认服务器对应的 SSH 配置文件、私钥、公钥、别名以及 password 模式所需的 sshpass。\n"
             "适合在首次联机前排查环境问题。"
         ),
         epilog=(
