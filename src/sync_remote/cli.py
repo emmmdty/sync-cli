@@ -12,10 +12,13 @@ from dotenv import dotenv_values
 
 from .config import (
     DEFAULT_CONFIG_FILENAME,
+    delete_server as delete_config_server,
     ensure_gitignore_entry,
     expand_user_path,
+    list_server_names,
     load_project_config,
     prompt_for_config,
+    set_default_host as set_config_default_host,
     write_project_config,
 )
 from .operations import (
@@ -25,6 +28,7 @@ from .operations import (
     default_backup_archive_path,
     default_download_archive_path,
 )
+from .self_update import get_display_version, run_self_update
 from .ssh_config import read_ssh_host_entry
 from .transport import download_remote_archive, open_vscode_remote, resolve_connection_port, should_exclude_by_pattern, sync_upload
 
@@ -141,12 +145,13 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser(
         "init",
         add_help=False,
-        help="初始化当前目录的 sync-remote.yaml 配置文件",
+        help="新增一个服务器到当前目录的 sync-remote.yaml 配置文件",
         description=(
             "初始化当前目录的 sync-remote.yaml\n"
             "可执行命令: `sync-remote init` 或 `sr init`\n\n"
-            "运行后会在当前目录生成 `sync-remote.yaml`\n"
+            "运行后会在当前目录生成或更新 `sync-remote.yaml`\n"
             "若检测到 `.gitignore`，会自动追加配置文件名\n"
+            "若当前目录已存在配置文件，则会追加新的服务器并将其设为默认\n"
             "会优先读取本机 ~/.ssh/config 中已有的 Host\n"
             "若没有可用 Host，可在初始化过程中创建新的 SSH 配置\n\n"
             "端口模式:\n"
@@ -305,12 +310,112 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         help="监听防抖时间，单位毫秒；默认 1000",
     )
 
+    switch_command = subparsers.add_parser(
+        "switch",
+        add_help=False,
+        help="切换默认上传服务器",
+        description=(
+            "切换当前项目默认使用的服务器。\n"
+            "可执行命令: `sync-remote switch` 或 `sr switch`\n\n"
+            "行为说明:\n"
+            "  - 可直接传入 host 别名\n"
+            "  - 不传时会列出已配置服务器供选择\n"
+            "  - 切换后会更新配置中的默认服务器"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr switch gpu-b\n"
+            "  sr switch"
+        ),
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(switch_command)
+    switch_command.add_argument("host", nargs="?", help="要切换到的 Host 别名")
+
+    delete_command = subparsers.add_parser(
+        "del",
+        add_help=False,
+        help="删除指定服务器配置",
+        description=(
+            "删除当前项目中的一个服务器配置。\n"
+            "可执行命令: `sync-remote del` 或 `sr del`\n\n"
+            "行为说明:\n"
+            "  - 可直接传入 host 别名\n"
+            "  - 不传时会列出已配置服务器供选择\n"
+            "  - 若删除默认服务器，会自动把最后一个剩余服务器设为默认"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr del gpu-b\n"
+            "  sr del"
+        ),
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(delete_command)
+    delete_command.add_argument("host", nargs="?", help="要删除的 Host 别名")
+
+    upload_all = subparsers.add_parser(
+        "upload-all-gpu",
+        add_help=False,
+        help="将当前目录上传到所有已配置服务器",
+        description=(
+            "按顺序把当前目录上传到配置文件中的所有服务器。\n"
+            "可执行命令: `sync-remote upload-all-gpu` 或 `sr upload-all-gpu`\n\n"
+            "行为说明:\n"
+            "  - 逐个服务器执行 upload 逻辑\n"
+            "  - 某个服务器失败时不会中断后续服务器\n"
+            "  - 全部完成后输出成功/失败汇总"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr upload-all-gpu\n"
+            "  sr upload-all-gpu --dry-run"
+        ),
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(upload_all)
+    _add_common_sync_arguments(upload_all, for_open=False)
+
+    version_command = subparsers.add_parser(
+        "version",
+        add_help=False,
+        help="显示当前安装版本号",
+        description=(
+            "显示当前安装版本号。\n"
+            "可执行命令: `sync-remote version` 或 `sr version`"
+        ),
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(version_command)
+
+    update_command = subparsers.add_parser(
+        "update",
+        add_help=False,
+        help="从 GitHub 更新当前工具版本",
+        description=(
+            "从 GitHub 更新当前工具版本。\n"
+            "可执行命令: `sync-remote update` 或 `sr update`\n\n"
+            "行为说明:\n"
+            "  - 默认优先使用最新 Release\n"
+            "  - 若最新 Release/Tag 版本低于当前基线版本，则自动切换到 main\n"
+            "  - 支持显式指定 `main` 或 `release` 通道"
+        ),
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(update_command)
+    update_command.add_argument(
+        "--channel",
+        choices=["main", "release"],
+        metavar="{main,release}",
+        help="指定更新通道；默认根据当前版本和最新 Release 自动选择",
+    )
+
     status = subparsers.add_parser(
         "status",
         add_help=False,
         help="显示当前配置、远端目录和端口解析结果",
         description=(
-            "显示当前生效的配置文件、认证方式、SSH 目标、SSH 文件状态、远端目录和端口解析结果。\n"
+            "显示当前默认服务器、生效配置、SSH 目标、SSH 文件状态、远端目录和端口解析结果。\n"
             "会显示认证方式、SSH 配置文件、私钥、公钥和别名状态。\n"
             "适合在 upload/download/open 前先确认配置解析结果。"
         ),
@@ -351,9 +456,48 @@ def _load_config_or_report() -> tuple[object, Path] | None:
         return None
 
 
+def _select_host_from_config(config, *, prompt_text: str = "选择服务器") -> str | None:
+    hosts = list_server_names(config)
+    if not hosts:
+        print("当前配置中没有可用服务器")
+        return None
+
+    print("可用服务器：")
+    default_index = 1
+    for index, host in enumerate(hosts, start=1):
+        suffix = " (default)" if host == config.default_host else ""
+        if host == config.default_host:
+            default_index = index
+        print(f"  {index}. {host}{suffix}")
+
+    selection = input(f"{prompt_text} [{default_index}]: ").strip() or str(default_index)
+    try:
+        selected_index = int(selection)
+    except ValueError:
+        print(f"无效选择: {selection}")
+        return None
+    if not 1 <= selected_index <= len(hosts):
+        print(f"无效选择: {selection}")
+        return None
+    return hosts[selected_index - 1]
+
+
+def _resolve_requested_host(config, requested_host: str | None) -> str | None:
+    if requested_host and requested_host in config.servers:
+        return requested_host
+    if requested_host:
+        print(f"未找到服务器: {requested_host}")
+    return _select_host_from_config(config)
+
+
 def _handle_init() -> int:
     project_dir = Path.cwd()
-    config = prompt_for_config()
+    try:
+        existing_config, _existing_path = load_project_config(project_dir)
+    except FileNotFoundError:
+        existing_config = None
+
+    config = prompt_for_config(existing_config=existing_config)
     config_path = write_project_config(config, project_dir / DEFAULT_CONFIG_FILENAME)
     ensure_gitignore_entry(project_dir, DEFAULT_CONFIG_FILENAME)
     print(f"配置已写入: {config_path}")
@@ -654,6 +798,104 @@ def _handle_watch(args: argparse.Namespace) -> int:
     return _run_watch_loop(args, config=config, remote_dir=remote_dir, port=port, password=password)
 
 
+def _handle_switch(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, config_path = loaded
+    target_host = _resolve_requested_host(config, args.host)
+    if target_host is None:
+        return 1
+    if target_host == config.default_host:
+        print(f"默认服务器已是: {target_host}")
+        return 0
+
+    updated_config = set_config_default_host(config, target_host)
+    write_project_config(updated_config, config_path)
+    print(f"默认服务器已切换为: {target_host}")
+    return 0
+
+
+def _handle_delete(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, config_path = loaded
+    target_host = _resolve_requested_host(config, args.host)
+    if target_host is None:
+        return 1
+
+    try:
+        updated_config = delete_config_server(config, target_host)
+    except ValueError as exc:
+        print(exc)
+        return 1
+
+    write_project_config(updated_config, config_path)
+    print(f"已删除服务器: {target_host}")
+    print(f"当前默认服务器: {updated_config.default_host}")
+    return 0
+
+
+def _handle_upload_all(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, _config_path = loaded
+    successes: list[str] = []
+    failures: list[tuple[str, str]] = []
+
+    for host in list_server_names(config):
+        host_config = set_config_default_host(config, host)
+        remote_dir = _resolve_remote_dir(host_config)
+        try:
+            port = resolve_connection_port(host_config, explicit_port=args.port)
+        except RuntimeError as exc:
+            failures.append((host, str(exc)))
+            continue
+
+        password = _resolve_runtime_password(host_config)
+        if host_config.connection.auth_mode == "password" and password is None:
+            failures.append((host, "未提供 password 模式所需密码或缺少 sshpass"))
+            continue
+
+        success = _perform_upload(
+            args,
+            config=host_config,
+            remote_dir=remote_dir,
+            port=port,
+            password=password,
+        )
+        if success:
+            successes.append(host)
+        else:
+            failures.append((host, "上传失败"))
+
+    print("上传汇总:")
+    print(f"成功: {', '.join(successes) if successes else '<none>'}")
+    if failures:
+        print("失败:")
+        for host, reason in failures:
+            print(f"  - {host}: {reason}")
+    else:
+        print("失败: <none>")
+    return 0 if not failures else 1
+
+
+def _handle_version() -> int:
+    print(f"sync-remote {get_display_version()}")
+    return 0
+
+
+def _handle_update(args: argparse.Namespace) -> int:
+    success, message = run_self_update(channel=args.channel)
+    print(message)
+    return 0 if success else 1
+
+
 def _handle_status() -> int:
     loaded = _load_config_or_report()
     if loaded is None:
@@ -666,6 +908,11 @@ def _handle_status() -> int:
     ssh_public_key = _ssh_public_key_file(config)
 
     print(f"配置文件: {config_path}")
+    print(f"默认服务器: {config.default_host}")
+    print("服务器列表:")
+    for host in list_server_names(config):
+        suffix = " (default)" if host == config.default_host else ""
+        print(f"  - {host}{suffix}")
     print(f"认证方式: {config.connection.auth_mode}")
     print(f"端口模式: {config.connection.port_mode}")
     print(f"SSH Host: {config.connection.host}")
@@ -742,6 +989,16 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_open(args)
     if args.command in {"watch", "wt"}:
         return _handle_watch(args)
+    if args.command == "switch":
+        return _handle_switch(args)
+    if args.command == "del":
+        return _handle_delete(args)
+    if args.command == "upload-all-gpu":
+        return _handle_upload_all(args)
+    if args.command == "version":
+        return _handle_version()
+    if args.command == "update":
+        return _handle_update(args)
     if args.command == "status":
         return _handle_status()
     if args.command == "doctor":

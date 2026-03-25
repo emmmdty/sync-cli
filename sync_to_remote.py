@@ -19,6 +19,11 @@ KNOWN_COMMANDS = {
     "op",
     "watch",
     "wt",
+    "switch",
+    "del",
+    "upload-all-gpu",
+    "version",
+    "update",
     "status",
     "doctor",
 }

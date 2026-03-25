@@ -9,6 +9,7 @@ from sync_remote.config import (
     CpolarSettings,
     ProjectConfig,
     ProjectSettings,
+    ServerSettings,
     SyncSettings,
 )
 
@@ -42,6 +43,50 @@ def build_config(
         cpolar=CpolarSettings(tunnel_name=tunnel_name, env_path=env_path),
         sync=SyncSettings(transport="rsync", max_file_size_mb=50, excludes=(".git",)),
         backup=BackupSettings(excludes=(".git", ".venv", ".*")),
+    )
+
+
+def build_multi_config(*, default_host: str = "gpu-a") -> ProjectConfig:
+    servers = {
+        "gpu-a": ServerSettings(
+            connection=ConnectionSettings(
+                user="alice",
+                host="gpu-a",
+                hostname="gpu-a.internal",
+                port_mode="fixed",
+                port=2222,
+                ssh_config_path="~/.ssh/config",
+                ssh_key_path="~/.ssh/id_ed25519",
+                known_hosts_check=True,
+                auth_mode="key",
+            ),
+            cpolar=CpolarSettings(tunnel_name="", env_path="~/.env"),
+        ),
+        "gpu-b": ServerSettings(
+            connection=ConnectionSettings(
+                user="bob",
+                host="gpu-b",
+                hostname="gpu-b.internal",
+                port_mode="fixed",
+                port=2200,
+                ssh_config_path="~/.ssh/config",
+                ssh_key_path="~/.ssh/id_ed25519",
+                known_hosts_check=True,
+                auth_mode="key",
+            ),
+            cpolar=CpolarSettings(tunnel_name="", env_path="~/.env"),
+        ),
+    }
+    active_server = servers[default_host]
+    return ProjectConfig(
+        version=2,
+        project=ProjectSettings(remote_base_dir="/srv/work", append_project_dir=True),
+        connection=active_server.connection,
+        cpolar=active_server.cpolar,
+        sync=SyncSettings(transport="rsync", max_file_size_mb=50, excludes=(".git",)),
+        backup=BackupSettings(excludes=(".git", ".venv", ".*")),
+        default_host=default_host,
+        servers=servers,
     )
 
 
@@ -403,3 +448,143 @@ def test_doctor_reports_missing_ssh_config_public_key_and_sshpass(tmp_path: Path
     assert "ssh_alias: MISSING" in captured.out
     assert f"cpolar_env: MISSING ({config.cpolar.env_path})" in captured.out
     assert f"cpolar_credentials: MISSING ({config.cpolar.env_path})" in captured.out
+
+
+def test_switch_updates_default_host_and_persists_config(tmp_path: Path, monkeypatch) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    saved: dict[str, object] = {}
+    config = build_multi_config(default_host="gpu-a")
+
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr("sync_remote.cli.load_project_config", lambda cwd=None: (config, project_dir / "sync-remote.yaml"))
+
+    def fake_write(updated_config, path):
+        saved["config"] = updated_config
+        saved["path"] = Path(path)
+        return Path(path)
+
+    monkeypatch.setattr("sync_remote.cli.write_project_config", fake_write)
+
+    exit_code = main(["switch", "gpu-b"])
+
+    assert exit_code == 0
+    assert saved["path"] == project_dir / "sync-remote.yaml"
+    assert saved["config"].default_host == "gpu-b"
+    assert saved["config"].connection.host == "gpu-b"
+
+
+def test_del_missing_host_prompts_for_selection_and_removes_selected_server(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    saved: dict[str, object] = {}
+    answers = iter(["2"])
+    config = build_multi_config(default_host="gpu-a")
+
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    monkeypatch.setattr("sync_remote.cli.load_project_config", lambda cwd=None: (config, project_dir / "sync-remote.yaml"))
+
+    def fake_write(updated_config, path):
+        saved["config"] = updated_config
+        return Path(path)
+
+    monkeypatch.setattr("sync_remote.cli.write_project_config", fake_write)
+
+    exit_code = main(["del", "missing"])
+
+    assert exit_code == 0
+    assert set(saved["config"].servers) == {"gpu-a"}
+    assert saved["config"].default_host == "gpu-a"
+    captured = capsys.readouterr()
+    assert "未找到服务器: missing" in captured.out
+
+
+def test_upload_all_gpu_continues_after_failures_and_reports_summary(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    config = build_multi_config(default_host="gpu-a")
+    attempts: list[tuple[str, str, str]] = []
+
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr("sync_remote.cli.load_project_config", lambda cwd=None: (config, project_dir / "sync-remote.yaml"))
+    monkeypatch.setattr(
+        "sync_remote.cli.resolve_connection_port",
+        lambda config, explicit_port=None: "2222" if config.connection.host == "gpu-a" else "2200",
+    )
+
+    def fake_upload(*, remote_dir, port, config, **_kwargs):
+        attempts.append((config.connection.host, remote_dir, port))
+        return config.connection.host != "gpu-b"
+
+    monkeypatch.setattr("sync_remote.cli.sync_upload", fake_upload)
+
+    exit_code = main(["upload-all-gpu"])
+
+    assert exit_code == 1
+    assert attempts == [
+        ("gpu-a", "/srv/work/demo", "2222"),
+        ("gpu-b", "/srv/work/demo", "2200"),
+    ]
+    captured = capsys.readouterr()
+    assert "gpu-a" in captured.out
+    assert "gpu-b" in captured.out
+    assert "失败" in captured.out
+
+
+def test_status_reports_default_host_and_server_list(tmp_path: Path, monkeypatch, capsys) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    config = build_multi_config(default_host="gpu-b")
+
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr("sync_remote.cli.load_project_config", lambda cwd=None: (config, project_dir / "sync-remote.yaml"))
+    monkeypatch.setattr("sync_remote.cli.resolve_connection_port", lambda config, explicit_port=None: "2200")
+    monkeypatch.setattr("sync_remote.cli._ssh_alias_status", lambda config: "OK")
+    monkeypatch.setattr("sync_remote.cli._cpolar_env_status", lambda config: f"SKIPPED ({config.cpolar.env_path})")
+    monkeypatch.setattr("sync_remote.cli._cpolar_credentials_status", lambda config: f"SKIPPED ({config.cpolar.env_path})")
+    monkeypatch.setattr("sync_remote.cli._sshpass_status", lambda config: "SKIPPED (key mode)")
+
+    exit_code = main(["status"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "默认服务器: gpu-b" in captured.out
+    assert "服务器列表:" in captured.out
+    assert "gpu-a" in captured.out
+    assert "gpu-b" in captured.out
+
+
+def test_version_prints_display_version(monkeypatch, capsys) -> None:
+    monkeypatch.setattr("sync_remote.cli.get_display_version", lambda: "0.3.0-main-2026-03-24")
+
+    exit_code = main(["version"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "sync-remote 0.3.0-main-2026-03-24"
+
+
+def test_update_delegates_to_self_update_runner(monkeypatch, capsys) -> None:
+    recorded: dict[str, object] = {}
+
+    def fake_run_self_update(*, channel: str | None):
+        recorded["channel"] = channel
+        return True, "已更新到 release 0.4.0"
+
+    monkeypatch.setattr("sync_remote.cli.run_self_update", fake_run_self_update)
+
+    exit_code = main(["update", "--channel", "release"])
+
+    assert exit_code == 0
+    assert recorded["channel"] == "release"
+    captured = capsys.readouterr()
+    assert "已更新到 release 0.4.0" in captured.out

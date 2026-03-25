@@ -28,6 +28,11 @@ def test_top_level_help_mentions_both_command_names_and_examples(capsys) -> None
     assert "sync-remote open" in captured.out
     assert "sr op" in captured.out
     assert "watch (wt)" in captured.out
+    assert "switch" in captured.out
+    assert "del" in captured.out
+    assert "upload-all-gpu" in captured.out
+    assert "version" in captured.out
+    assert "update" in captured.out
 
 
 def test_init_help_explains_generated_config_and_modes(capsys) -> None:
@@ -37,8 +42,9 @@ def test_init_help_explains_generated_config_and_modes(capsys) -> None:
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "usage: sync-remote init" in captured.out
-    assert "运行后会在当前目录生成 `sync-remote.yaml`" in captured.out
+    assert "运行后会在当前目录生成或更新 `sync-remote.yaml`" in captured.out
     assert "若检测到 `.gitignore`，会自动追加配置文件名" in captured.out
+    assert "若当前目录已存在配置文件，则会追加新的服务器并将其设为默认" in captured.out
     assert "auto: 自动模式，优先从 Cpolar 获取端口，失败时回退 ~/.ssh/config" in captured.out
     assert "fixed: 固定模式，直接使用配置中的固定端口，不访问 Cpolar" in captured.out
     assert "会优先读取本机 ~/.ssh/config 中已有的 Host" in captured.out
@@ -129,7 +135,7 @@ def test_status_help_describes_report_contents(capsys) -> None:
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "usage: sync-remote status" in captured.out
-    assert "显示当前生效的配置文件、认证方式、SSH 目标、SSH 文件状态、远端目录和端口解析结果" in captured.out
+    assert "显示当前默认服务器、生效配置、SSH 目标、SSH 文件状态、远端目录和端口解析结果" in captured.out
     assert "认证方式、SSH 配置文件、私钥、公钥和别名状态" in captured.out
     assert "适合在 upload/download/open 前先确认配置解析结果" in captured.out
 
@@ -144,3 +150,57 @@ def test_doctor_help_describes_checks(capsys) -> None:
     assert "检查 ssh、rsync、code、sshpass、配置文件、SSH 文件和端口解析状态" in captured.out
     assert "SSH 配置文件、私钥、公钥、别名以及 password 模式所需的 sshpass" in captured.out
     assert "适合在首次联机前排查环境问题" in captured.out
+
+
+def test_switch_help_describes_default_host_switching(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["switch", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote switch" in captured.out
+    assert "切换当前项目默认使用的服务器" in captured.out
+    assert "不传时会列出已配置服务器供选择" in captured.out
+
+
+def test_del_help_describes_host_removal(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["del", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote del" in captured.out
+    assert "删除当前项目中的一个服务器配置" in captured.out
+    assert "若删除默认服务器，会自动把最后一个剩余服务器设为默认" in captured.out
+
+
+def test_upload_all_gpu_help_describes_batch_upload_behavior(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["upload-all-gpu", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote upload-all-gpu" in captured.out
+    assert "按顺序把当前目录上传到配置文件中的所有服务器" in captured.out
+    assert "某个服务器失败时不会中断后续服务器" in captured.out
+
+
+def test_version_help_describes_current_version_output(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["version", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote version" in captured.out
+    assert "显示当前安装版本号" in captured.out
+
+
+def test_update_help_describes_channels(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["update", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote update" in captured.out
+    assert "--channel {main,release}" in captured.out
+    assert "默认优先使用最新 Release" in captured.out

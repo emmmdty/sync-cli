@@ -62,6 +62,58 @@ def test_load_project_config_prefers_new_yaml(tmp_path: Path) -> None:
     assert config.connection.auth_mode == "password"
 
 
+def test_load_project_config_supports_v2_servers_and_default_host(tmp_path: Path) -> None:
+    new_config = {
+        "version": 2,
+        "project": {"remote_base_dir": "/srv/new", "append_project_dir": True},
+        "default_host": "gpu-b",
+        "servers": {
+            "gpu-a": {
+                "user": "alice",
+                "host": "gpu-a",
+                "hostname": "gpu-a.internal",
+                "port_mode": "fixed",
+                "port": 2222,
+                "ssh_config_path": "~/.ssh/config",
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "key",
+                "cpolar": {"tunnel_name": "", "env_path": "~/.env"},
+            },
+            "gpu-b": {
+                "user": "bob",
+                "host": "gpu-b",
+                "hostname": "gpu-b.internal",
+                "port_mode": "auto",
+                "port": None,
+                "ssh_config_path": "~/.ssh/config",
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "password",
+                "cpolar": {"tunnel_name": "prod-tunnel", "env_path": "~/.env.prod"},
+            },
+        },
+        "sync": {"transport": "rsync", "max_file_size_mb": 50, "excludes": ["node_modules"]},
+        "backup": {"excludes": [".git", ".venv"]},
+    }
+
+    (tmp_path / DEFAULT_CONFIG_FILENAME).write_text(
+        yaml.safe_dump(new_config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    config, source_path = load_project_config(tmp_path)
+
+    assert source_path == tmp_path / DEFAULT_CONFIG_FILENAME
+    assert config.version == 2
+    assert config.default_host == "gpu-b"
+    assert set(config.servers) == {"gpu-a", "gpu-b"}
+    assert config.connection.host == "gpu-b"
+    assert config.connection.hostname == "gpu-b.internal"
+    assert config.connection.auth_mode == "password"
+    assert config.cpolar.tunnel_name == "prod-tunnel"
+
+
 def test_load_project_config_falls_back_to_legacy_mapping(tmp_path: Path) -> None:
     legacy_config = {
         "targets": {
