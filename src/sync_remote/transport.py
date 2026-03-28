@@ -274,7 +274,7 @@ def build_rsync_command(
         "rsync",
         "-az",
         "--partial",
-        "--append-verify",
+        "--modify-window=-1",
         "--info=progress2,name0",
         "-e",
         build_rsync_ssh_command(config, port),
@@ -283,6 +283,24 @@ def build_rsync_command(
         command.extend(["--exclude", pattern])
     command.extend([source, destination])
     return command
+
+
+def normalize_remote_parent(path: str) -> str:
+    return path or "."
+
+
+def filter_sync_paths(
+    base_dir: Path,
+    selected_paths: list[tuple[str, Path]],
+    *,
+    excludes: tuple[str, ...],
+    max_size_bytes: int,
+) -> list[tuple[str, Path]]:
+    return [
+        (rel_path, abs_path)
+        for rel_path, abs_path in selected_paths
+        if not should_exclude(abs_path, base_dir, excludes, max_size_bytes)
+    ]
 
 
 def run_rsync_command(command: list[str], label: str, *, config: ProjectConfig, password: str | None = None) -> bool:
@@ -407,22 +425,31 @@ def sync_upload_rsync(
     print(f"远程: {build_remote_identity(config)}:{remote_dir}")
 
     if sync_paths:
-        selected_paths = normalize_sync_paths(local_dir, sync_paths, require_exists=True)
+        selected_paths = filter_sync_paths(
+            local_dir,
+            normalize_sync_paths(local_dir, sync_paths, require_exists=True),
+            excludes=excludes,
+            max_size_bytes=max_size_bytes,
+        )
+        if not selected_paths:
+            print("没有文件需要同步")
+            return True
         if dry_run:
             for rel_path, _ in selected_paths:
                 print(f"[DRY-RUN] 上传路径: {rel_path}")
             return True
         for rel_path, abs_path in selected_paths:
             remote_target = f"{remote_dir}/{rel_path}".replace("//", "/")
-            remote_parent = os.path.dirname(remote_target)
+            remote_parent = normalize_remote_parent(os.path.dirname(remote_target))
             if not ensure_remote_directory(config, port, remote_parent, password=password):
                 return False
+            command_excludes = excludes if abs_path.is_dir() else ()
             command = build_rsync_command(
                 config,
                 port=port,
                 source=str(abs_path),
                 destination=f"{build_remote_identity(config)}:{remote_parent}/",
-                excludes=(),
+                excludes=command_excludes,
             )
             if not run_rsync_command(command, f"上传 {rel_path}", config=config, password=password):
                 return False
@@ -479,7 +506,7 @@ def sync_upload_archive(
         print("没有文件需要同步")
         return True
 
-    remote_parent = os.path.dirname(remote_dir.rstrip("/"))
+    remote_parent = normalize_remote_parent(os.path.dirname(remote_dir.rstrip("/")))
     if not ensure_remote_directory(config, port, remote_parent, password=password):
         return False
 
@@ -585,7 +612,7 @@ def download_remote_archive(
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     remote_dir = remote_dir.rstrip("/")
-    remote_parent = os.path.dirname(remote_dir)
+    remote_parent = normalize_remote_parent(os.path.dirname(remote_dir.rstrip("/")))
     remote_name = os.path.basename(remote_dir)
     exclude_args = " ".join(f"--exclude={shlex.quote(item)}" for item in config.sync.excludes)
     remote_tar_command = (

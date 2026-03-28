@@ -393,7 +393,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         description=(
             "显示当前安装版本号。\n"
             "可执行命令: `sync-remote version` 或 `sr version`\n\n"
-            "若当前安装来自 main 通道，会显示类似 `0.4.1-main-YYYY-MM-DD` 的展示版本。"
+            "若当前安装来自 main 通道，会显示类似 `0.4.2-main-YYYY-MM-DD` 的展示版本。"
         ),
         formatter_class=HelpFormatter,
     )
