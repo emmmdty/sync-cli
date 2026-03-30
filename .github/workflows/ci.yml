@@ -44,5 +44,6 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+          save-cache: false
       - name: Build distributions
         run: uv build

@@ -110,4 +110,6 @@ def test_repository_has_github_actions_ci_workflow() -> None:
 
     assert any(step.get("uses") == "actions/checkout@v5" for step in build_steps)
     assert any(step.get("uses") == "astral-sh/setup-uv@v7" for step in build_steps)
+    build_setup_uv_step = next(step for step in build_steps if step.get("uses") == "astral-sh/setup-uv@v7")
+    assert build_setup_uv_step["with"]["save-cache"] is False
     assert any(step.get("run") == "uv build" for step in build_steps)
