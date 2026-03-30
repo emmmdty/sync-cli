@@ -114,6 +114,60 @@ def test_load_project_config_supports_v2_servers_and_default_host(tmp_path: Path
     assert config.cpolar.tunnel_name == "prod-tunnel"
 
 
+def test_load_project_config_uses_server_specific_remote_dirs(tmp_path: Path) -> None:
+    new_config = {
+        "version": 2,
+        "project": {"remote_base_dir": "/srv/legacy", "append_project_dir": True},
+        "default_host": "gpu-b",
+        "servers": {
+            "gpu-a": {
+                "user": "alice",
+                "host": "gpu-a",
+                "hostname": "gpu-a.internal",
+                "port_mode": "fixed",
+                "port": 2222,
+                "ssh_config_path": "~/.ssh/config",
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "key",
+                "remote_base_dir": "/srv/work-a",
+                "append_project_dir": True,
+                "cpolar": {"tunnel_name": "", "env_path": "~/.env"},
+            },
+            "gpu-b": {
+                "user": "bob",
+                "host": "gpu-b",
+                "hostname": "gpu-b.internal",
+                "port_mode": "fixed",
+                "port": 2200,
+                "ssh_config_path": "~/.ssh/config",
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "key",
+                "remote_base_dir": "/srv/work-b",
+                "append_project_dir": False,
+                "cpolar": {"tunnel_name": "", "env_path": "~/.env"},
+            },
+        },
+        "sync": {"transport": "rsync", "max_file_size_mb": 50, "excludes": ["node_modules"]},
+        "backup": {"excludes": [".git", ".venv"]},
+    }
+
+    (tmp_path / DEFAULT_CONFIG_FILENAME).write_text(
+        yaml.safe_dump(new_config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    config, _source_path = load_project_config(tmp_path)
+
+    assert config.project.remote_base_dir == "/srv/work-b"
+    assert config.project.append_project_dir is False
+    assert config.get_server("gpu-a").project.remote_base_dir == "/srv/work-a"
+    assert config.get_server("gpu-a").project.append_project_dir is True
+    assert config.get_server("gpu-b").project.remote_base_dir == "/srv/work-b"
+    assert config.get_server("gpu-b").project.append_project_dir is False
+
+
 def test_load_project_config_falls_back_to_legacy_mapping(tmp_path: Path) -> None:
     legacy_config = {
         "targets": {

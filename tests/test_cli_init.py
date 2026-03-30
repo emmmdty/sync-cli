@@ -266,13 +266,15 @@ def test_init_appends_server_and_sets_new_default_host(tmp_path: Path, monkeypat
                 "ssh_key_path": "~/.ssh/id_ed25519",
                 "known_hosts_check": True,
                 "auth_mode": "key",
+                "remote_base_dir": "/srv/work-a",
+                "append_project_dir": True,
                 "cpolar": {"tunnel_name": "", "env_path": "~/.env"},
             }
         },
         "sync": {"transport": "rsync", "max_file_size_mb": 50, "excludes": [".git"]},
         "backup": {"excludes": [".git", ".venv"]},
     }
-    answers = iter(["fixed", "1", "", "", "", "", "", "", ""])
+    answers = iter(["fixed", "1", "", "", "", "", "", "/srv/work-b", ""])
 
     def fake_input(_prompt: str = "") -> str:
         return next(answers)
@@ -296,4 +298,6 @@ def test_init_appends_server_and_sets_new_default_host(tmp_path: Path, monkeypat
     assert data["servers"]["gpu-b"]["host"] == "gpu-b"
     assert data["servers"]["gpu-b"]["hostname"] == "gpu-b.internal"
     assert data["servers"]["gpu-b"]["port"] == 2200
-    assert data["project"]["remote_base_dir"] == "/srv/work"
+    assert data["servers"]["gpu-a"]["remote_base_dir"] == "/srv/work-a"
+    assert data["servers"]["gpu-b"]["remote_base_dir"] == "/srv/work-b"
+    assert data["project"]["remote_base_dir"] == "/srv/work-b"

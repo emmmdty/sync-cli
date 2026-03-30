@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import copy
 import os
@@ -155,6 +155,7 @@ class BackupSettings:
 class ServerSettings:
     connection: ConnectionSettings
     cpolar: CpolarSettings
+    project: ProjectSettings | None = None
 
 
 @dataclass(frozen=True)
@@ -170,13 +171,17 @@ class ProjectConfig:
 
     def __post_init__(self) -> None:
         if self.servers:
-            servers = dict(self.servers)
+            servers = {
+                host: server if server.project is not None else replace(server, project=self.project)
+                for host, server in dict(self.servers).items()
+            }
             default_host = self.default_host or next(iter(servers))
             if default_host not in servers:
                 raise ValueError(f"default_host 不存在: {default_host}")
             active_server = servers[default_host]
             object.__setattr__(self, "servers", servers)
             object.__setattr__(self, "default_host", default_host)
+            object.__setattr__(self, "project", active_server.project)
             object.__setattr__(self, "connection", active_server.connection)
             object.__setattr__(self, "cpolar", active_server.cpolar)
             return
@@ -189,6 +194,7 @@ class ProjectConfig:
                 default_host: ServerSettings(
                     connection=self.connection,
                     cpolar=self.cpolar,
+                    project=self.project,
                 )
             },
         )
@@ -282,7 +288,10 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _server_to_dict(server: ServerSettings) -> dict:
+    project = server.project or default_project_config().project
     return {
+        "remote_base_dir": project.remote_base_dir,
+        "append_project_dir": project.append_project_dir,
         "user": server.connection.user,
         "host": server.connection.host,
         "hostname": server.connection.hostname,
@@ -301,7 +310,7 @@ def _server_to_dict(server: ServerSettings) -> dict:
 
 def _default_server_settings() -> ServerSettings:
     defaults = default_project_config()
-    return ServerSettings(connection=defaults.connection, cpolar=defaults.cpolar)
+    return ServerSettings(connection=defaults.connection, cpolar=defaults.cpolar, project=defaults.project)
 
 
 def _project_config_from_servers(
@@ -316,7 +325,7 @@ def _project_config_from_servers(
     active_server = servers[default_host]
     return ProjectConfig(
         version=version,
-        project=project,
+        project=active_server.project or project,
         connection=active_server.connection,
         cpolar=active_server.cpolar,
         sync=sync,
@@ -372,12 +381,18 @@ def _build_project_config(data: dict) -> ProjectConfig:
         }
         merged = _deep_merge(defaults, data)
         default_server = _server_to_dict(_default_server_settings())
+        default_server["remote_base_dir"] = merged["project"]["remote_base_dir"]
+        default_server["append_project_dir"] = bool(merged["project"].get("append_project_dir", True))
         servers: dict[str, ServerSettings] = {}
 
         for host_name, raw_server in (merged.get("servers") or {}).items():
             merged_server = _deep_merge(default_server, raw_server or {})
             port = merged_server.get("port")
             cpolar_data = merged_server.get("cpolar") or {}
+            project = ProjectSettings(
+                remote_base_dir=merged_server["remote_base_dir"],
+                append_project_dir=bool(merged_server.get("append_project_dir", True)),
+            )
             connection = ConnectionSettings(
                 user=merged_server["user"],
                 host=merged_server.get("host") or host_name,
@@ -395,6 +410,7 @@ def _build_project_config(data: dict) -> ProjectConfig:
                     tunnel_name=cpolar_data.get("tunnel_name", ""),
                     env_path=cpolar_data.get("env_path", "~/.env"),
                 ),
+                project=project,
             )
 
         default_host = merged.get("default_host") or next(iter(servers))
@@ -585,6 +601,23 @@ def add_or_update_server(config: ProjectConfig, server: ServerSettings, *, make_
     )
 
 
+def update_server_port(config: ProjectConfig, host: str, port: int | None) -> ProjectConfig:
+    if host not in config.servers:
+        raise KeyError(f"未找到服务器: {host}")
+
+    servers = dict(config.servers)
+    server = servers[host]
+    servers[host] = replace(server, connection=replace(server.connection, port=port))
+    return _project_config_from_servers(
+        version=max(config.version, 2),
+        project=config.project,
+        sync=config.sync,
+        backup=config.backup,
+        default_host=config.default_host,
+        servers=servers,
+    )
+
+
 def set_default_host(config: ProjectConfig, host: str) -> ProjectConfig:
     if host not in config.servers:
         raise KeyError(f"未找到服务器: {host}")
@@ -726,7 +759,12 @@ def prompt_for_config(existing_config: ProjectConfig | None = None, input_fn=Non
         print("请重新输入新的 SSH Host 别名。")
     hostname = ask("SSH HostName", hostname_default)
     ssh_key_path = ask("SSH 私钥路径", ssh_key_default)
-    remote_base_dir_default = existing_config.project.remote_base_dir if existing_config else defaults.project.remote_base_dir
+    existing_server = existing_config.get_server(host) if existing_config and host in existing_config.servers else None
+    remote_base_dir_default = (
+        existing_server.project.remote_base_dir
+        if existing_server and existing_server.project is not None
+        else defaults.project.remote_base_dir
+    )
     remote_base_dir = ask("远端基础目录", remote_base_dir_default)
 
     upsert_ssh_host_entry(
@@ -786,15 +824,20 @@ def prompt_for_config(existing_config: ProjectConfig | None = None, input_fn=Non
             tunnel_name=tunnel_name,
             env_path=env_path,
         ),
+        project=ProjectSettings(
+            remote_base_dir=remote_base_dir,
+            append_project_dir=(
+                existing_server.project.append_project_dir
+                if existing_server and existing_server.project is not None
+                else defaults.project.append_project_dir
+            ),
+        ),
     )
 
     if existing_config is None:
         return _project_config_from_servers(
             version=2,
-            project=ProjectSettings(
-                remote_base_dir=remote_base_dir,
-                append_project_dir=True,
-            ),
+            project=server.project,
             sync=defaults.sync,
             backup=defaults.backup,
             default_host=host,
@@ -803,19 +846,8 @@ def prompt_for_config(existing_config: ProjectConfig | None = None, input_fn=Non
 
     updated_config = add_or_update_server(existing_config, server, make_default=True)
     if overwrite_existing:
-        updated_config = add_or_update_server(updated_config, server, make_default=True)
-
-    return _project_config_from_servers(
-        version=2,
-        project=ProjectSettings(
-            remote_base_dir=remote_base_dir,
-            append_project_dir=existing_config.project.append_project_dir,
-        ),
-        sync=existing_config.sync,
-        backup=existing_config.backup,
-        default_host=updated_config.default_host,
-        servers=dict(updated_config.servers),
-    )
+        return add_or_update_server(updated_config, server, make_default=True)
+    return updated_config
 
 
 def expand_user_path(value: str) -> str:

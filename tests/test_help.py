@@ -67,6 +67,7 @@ def test_upload_help_mentions_long_and_short_commands(capsys) -> None:
     assert "额外排除指定路径或模式；会叠加配置文件中的 excludes" in captured.out
     assert "覆盖配置中的最大文件大小限制，单位 MB" in captured.out
     assert "临时覆盖本次连接端口，优先级高于配置和自动解析" in captured.out
+    assert "--hosts" in captured.out
     assert "不输出排除文件统计信息" in captured.out
     assert "password 模式会在命令执行前提示输入服务器密码" in captured.out
 
@@ -188,7 +189,7 @@ def test_upload_all_gpu_help_describes_batch_upload_behavior(capsys) -> None:
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "usage: sync-remote upload-all-gpu" in captured.out
-    assert "按顺序把当前目录上传到配置文件中的所有服务器" in captured.out
+    assert "并发把当前目录上传到配置文件中的所有服务器" in captured.out
     assert "某个服务器失败时不会中断后续服务器" in captured.out
 
 
@@ -200,7 +201,7 @@ def test_version_help_describes_current_version_output(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote version" in captured.out
     assert "显示当前安装版本号" in captured.out
-    assert "0.4.2-main-YYYY-MM-DD" in captured.out
+    assert "0.4.3-main-YYYY-MM-DD" in captured.out
 
 
 def test_update_help_describes_channels(capsys) -> None:
