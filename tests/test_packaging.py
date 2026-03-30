@@ -15,7 +15,9 @@ def test_pyproject_exposes_entrypoints_and_repository_metadata() -> None:
     assert 'sr = "sync_remote.cli:run"' in content
     assert 'description = "CLI tool for syncing the current project directory to a remote server"' in content
     assert 'readme = "README.md"' in content
-    assert 'license = { file = "LICENSE" }' in content
+    assert 'license = "MIT"' in content
+    assert 'license-files = ["LICENSE"]' in content
+    assert 'License :: OSI Approved :: MIT License' not in content
     assert 'authors = [{ name = "emmmdty" }]' in content
 
 
