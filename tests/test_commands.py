@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -692,6 +693,180 @@ def test_status_reports_default_host_and_server_list(tmp_path: Path, monkeypatch
     assert "gpu-b" in captured.out
 
 
+def test_port_sync_updates_matching_ssh_port_without_project_yaml(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    ssh_config_path = ssh_dir / "config"
+    ssh_config_path.write_text(
+        (
+            "Host gpu-a\n"
+            "  HostName gpu-a.internal\n"
+            "  User pc3048\n"
+            "  Port 22\n"
+        ),
+        encoding="utf-8",
+    )
+    work_dir = tmp_path / "anywhere"
+    work_dir.mkdir()
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(work_dir)
+    monkeypatch.setattr(
+        "sync_remote.cli.load_project_config",
+        lambda cwd=None: (_ for _ in ()).throw(AssertionError("port-sync should not load project yaml")),
+    )
+    monkeypatch.setattr(
+        "sync_remote.cli.fetch_cpolar_status_entries",
+        lambda env_path="~/.env": [
+            SimpleNamespace(tunnel_name="pc3048", hostname="gpu-a.internal", port="43001")
+        ],
+        raising=False,
+    )
+
+    exit_code = main(["port-sync", "--hostname", "gpu-a.internal"])
+
+    assert exit_code == 0
+    assert not (work_dir / DEFAULT_CONFIG_FILENAME).exists()
+    assert "Port 43001" in ssh_config_path.read_text(encoding="utf-8")
+    captured = capsys.readouterr()
+    assert "gpu-a" in captured.out
+    assert "43001" in captured.out
+
+
+def test_port_sync_auto_updates_matching_entries_when_run_without_arguments(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    ssh_config_path = ssh_dir / "config"
+    ssh_config_path.write_text(
+        (
+            "Host gpu-a\n"
+            "  HostName gpu-a.internal\n"
+            "  User pc3048\n"
+            "  Port 22\n"
+            "Host gpu-b\n"
+            "  HostName gpu-b.internal\n"
+            "  User other-tunnel\n"
+            "  Port 23\n"
+        ),
+        encoding="utf-8",
+    )
+    work_dir = tmp_path / "anywhere"
+    work_dir.mkdir()
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(work_dir)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": (_ for _ in ()).throw(AssertionError("should not prompt")))
+    monkeypatch.setattr(
+        "sync_remote.cli.fetch_cpolar_status_entries",
+        lambda env_path="~/.env": [
+            SimpleNamespace(tunnel_name="other-tunnel", hostname="gpu-b.internal", port="43002")
+        ],
+        raising=False,
+    )
+
+    exit_code = main(["port-sync"])
+
+    assert exit_code == 0
+    content = ssh_config_path.read_text(encoding="utf-8")
+    assert "Host gpu-a\n  HostName gpu-a.internal\n  User pc3048\n  Port 22\n" in content
+    assert "Host gpu-b\n  HostName gpu-b.internal\n  User other-tunnel\n  Port 43002\n" in content
+    captured = capsys.readouterr()
+    assert "gpu-b" in captured.out
+    assert "43002" in captured.out
+
+
+def test_port_sync_falls_back_to_interactive_selection_when_auto_scan_is_ambiguous(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    ssh_config_path = ssh_dir / "config"
+    ssh_config_path.write_text(
+        (
+            "Host gpu-a\n"
+            "  HostName shared.internal\n"
+            "  User tunnel-a\n"
+            "  Port 22\n"
+            "Host gpu-b\n"
+            "  HostName shared.internal\n"
+            "  User tunnel-b\n"
+            "  Port 23\n"
+        ),
+        encoding="utf-8",
+    )
+    work_dir = tmp_path / "anywhere"
+    work_dir.mkdir()
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(work_dir)
+    monkeypatch.setattr("sync_remote.cli.sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "1")
+    monkeypatch.setattr(
+        "sync_remote.cli.fetch_cpolar_status_entries",
+        lambda env_path="~/.env": [
+            SimpleNamespace(tunnel_name="tunnel-a", hostname="shared.internal", port="43001"),
+            SimpleNamespace(tunnel_name="tunnel-b", hostname="shared.internal", port="43002"),
+        ],
+        raising=False,
+    )
+
+    exit_code = main(["port-sync"])
+
+    assert exit_code == 0
+    content = ssh_config_path.read_text(encoding="utf-8")
+    assert "Host gpu-a\n  HostName shared.internal\n  User tunnel-a\n  Port 43001\n" in content
+    assert "Host gpu-b\n  HostName shared.internal\n  User tunnel-b\n  Port 23\n" in content
+    captured = capsys.readouterr()
+    assert "shared.internal" in captured.out
+    assert "gpu-a" in captured.out
+
+
+def test_port_sync_reports_cpolar_fetch_failures(tmp_path: Path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    ssh_config_path = ssh_dir / "config"
+    ssh_config_path.write_text(
+        (
+            "Host gpu-a\n"
+            "  HostName gpu-a.internal\n"
+            "  User pc3048\n"
+            "  Port 22\n"
+        ),
+        encoding="utf-8",
+    )
+    work_dir = tmp_path / "anywhere"
+    work_dir.mkdir()
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(work_dir)
+    monkeypatch.setattr(
+        "sync_remote.cli.fetch_cpolar_status_entries",
+        lambda env_path="~/.env": (_ for _ in ()).throw(RuntimeError("缺少 CPOLAR_USER 或 CPOLAR_PASS")),
+        raising=False,
+    )
+
+    exit_code = main(["port-sync"])
+
+    assert exit_code == 1
+    assert "Port 22" in ssh_config_path.read_text(encoding="utf-8")
+    captured = capsys.readouterr()
+    assert "缺少 CPOLAR_USER 或 CPOLAR_PASS" in captured.out
+
+
 def test_version_prints_display_version(monkeypatch, capsys) -> None:
     monkeypatch.setattr("sync_remote.cli.get_display_version", lambda: "0.3.0-main-2026-03-24")
 
@@ -707,7 +882,7 @@ def test_update_delegates_to_self_update_runner(monkeypatch, capsys) -> None:
 
     def fake_run_self_update(*, channel: str | None):
         recorded["channel"] = channel
-        return True, "已更新到 release 0.4.3"
+        return True, "已更新到 release 0.5.0"
 
     monkeypatch.setattr("sync_remote.cli.run_self_update", fake_run_self_update)
 
@@ -716,4 +891,4 @@ def test_update_delegates_to_self_update_runner(monkeypatch, capsys) -> None:
     assert exit_code == 0
     assert recorded["channel"] == "release"
     captured = capsys.readouterr()
-    assert "已更新到 release 0.4.3" in captured.out
+    assert "已更新到 release 0.5.0" in captured.out

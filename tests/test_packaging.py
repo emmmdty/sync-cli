@@ -23,48 +23,46 @@ def test_pyproject_exposes_entrypoints_and_repository_metadata() -> None:
 
 def test_repository_has_readme_license_and_gitignore() -> None:
     readme = ROOT / "README.md"
+    usage_doc = ROOT / "docs" / "usage.md"
     license_file = ROOT / "LICENSE"
     gitignore = ROOT / ".gitignore"
 
     assert readme.exists()
+    assert usage_doc.exists()
     assert license_file.exists()
     assert gitignore.exists()
 
     readme_content = readme.read_text(encoding="utf-8")
+    usage_content = usage_doc.read_text(encoding="utf-8")
     license_content = license_file.read_text(encoding="utf-8")
     gitignore_content = gitignore.read_text(encoding="utf-8")
 
     assert "# sync-remote" in readme_content
-    assert "远程同步命令行工具" in readme_content
-    assert "## 适用场景" in readme_content
-    assert "需要在本地项目目录和远端开发机之间高频同步代码" in readme_content
-    assert "同一份项目配置里切换默认目标或批量上传" in readme_content
-    assert "远端 SSH 端口可能通过 Cpolar 等隧道动态变化" in readme_content
-    assert "## 首次使用前准备" in readme_content
-    assert "Python 3.10+" in readme_content
-    assert "使用 `open` 时需要 VS Code 和 `code` 命令" in readme_content
-    assert "使用 `auto` 端口模式时需要准备含 `CPOLAR_USER` 和 `CPOLAR_PASS` 的环境变量文件" in readme_content
-    assert "uv tool install ." in readme_content
+    assert "把本地项目目录同步到远端 Linux 服务器" in readme_content
+    assert "项目内命令" in readme_content
+    assert "任意目录命令" in readme_content
+    assert "uv tool install git+https://github.com/emmmdty/sync-cli.git" in readme_content
     assert "sr init" in readme_content
+    assert "sr doctor" in readme_content
     assert "sr up" in readme_content
-    assert "sr switch gpu-b" in readme_content
-    assert "sr upload-all-gpu" in readme_content
-    assert "sr version" in readme_content
+    assert "sr port-sync --hostname gpu-a.internal" in readme_content
     assert "sr update --channel release" in readme_content
-    assert "sr watch" in readme_content
-    assert "sync-remote open --watch" in readme_content
-    assert "旧版单服务器配置仍可读取，但新的写回结构统一是 `version: 2`" in readme_content
-    assert "### `version: 2` 多服务器示例" in readme_content
-    assert "default_host: gpu-b" in readme_content
-    assert "servers:" in readme_content
-    assert "port_mode: auto" in readme_content
-    assert "hostname: example.tcp.vip.cpolar.cn" in readme_content
-    assert "auth_mode: password" in readme_content
-    assert "Host gpu-a" in readme_content
-    assert "Host gpu-b" in readme_content
-    assert "`update` 只支持通过 `uv tool install` 或 `uv tool install --editable` 安装的命令自动更新" in readme_content
-    assert "它本身只是兼容包装层，会把旧调用方式转发到新的 `sync-remote` CLI" in readme_content
+    assert "docs/usage.md" in readme_content
+    assert "如果你的 SSH `User` 不是 cpolar tunnel 名，请显式传 `--tunnel`" in readme_content
+    assert "旧版单服务器配置" not in readme_content
+    assert "兼容包装层" not in readme_content
     assert "MIT" in readme_content
+
+    assert "# sync-remote 使用手册" in usage_content
+    assert "## 1. 安装" in usage_content
+    assert "## 2. 最快上手" in usage_content
+    assert "## 3. 项目内命令" in usage_content
+    assert "## 4. 任意目录更新 SSH 端口" in usage_content
+    assert "## 5. `sync-remote.yaml` 示例" in usage_content
+    assert "## 7. 排错" in usage_content
+    assert "sr port-sync --hostname gpu-a.internal" in usage_content
+    assert "同名 tunnel" in usage_content
+    assert "如果你的 SSH `User` 不是 cpolar tunnel 名，请显式传 `--tunnel`" in usage_content
 
     assert "MIT License" in license_content
     assert "Copyright (c) 2026 emmmdty" in license_content
