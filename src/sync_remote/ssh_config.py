@@ -112,6 +112,29 @@ def list_explicit_ssh_hosts(config_path: Path | str) -> list[str]:
     return hosts
 
 
+def list_explicit_ssh_entries(config_path: Path | str) -> list[SSHHostEntry]:
+    path = Path(config_path)
+    if not path.exists():
+        return []
+
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines(True)
+    entries: list[SSHHostEntry] = []
+    for block in parse_ssh_config_blocks(lines):
+        for pattern in block["patterns"]:
+            if "*" in pattern or "?" in pattern:
+                continue
+            entries.append(
+                SSHHostEntry(
+                    host=pattern,
+                    hostname=block.get("hostname") or "",
+                    user=block.get("user") or "",
+                    port=str(block.get("port") or ""),
+                    identity_file=block.get("identity_file") or "",
+                )
+            )
+    return entries
+
+
 def read_ssh_host_entry(config_path: Path | str, host: str) -> SSHHostEntry | None:
     path = Path(config_path)
     if not path.exists():
@@ -208,4 +231,23 @@ def upsert_ssh_host_entry(config_path: Path | str, entry: SSHHostEntry) -> Path:
         _set_or_insert_property(lines, block, "identity_file", "IdentityFile", entry.identity_file)
 
     path.write_text("".join(lines), encoding="utf-8")
+    return path
+
+
+def update_ssh_port_for_hosts(config_path: Path | str, *, hosts: tuple[str, ...], new_port: str) -> Path:
+    path = Path(config_path)
+    for host in dict.fromkeys(hosts):
+        entry = read_ssh_host_entry(path, host)
+        if entry is None:
+            continue
+        upsert_ssh_host_entry(
+            path,
+            SSHHostEntry(
+                host=entry.host,
+                hostname=entry.hostname,
+                user=entry.user,
+                port=str(new_port),
+                identity_file=entry.identity_file,
+            ),
+        )
     return path

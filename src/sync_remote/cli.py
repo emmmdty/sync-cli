@@ -31,10 +31,13 @@ from .operations import (
     default_download_archive_path,
 )
 from .self_update import get_display_version, run_self_update
-from .ssh_config import read_ssh_host_entry
+from .ssh_config import SSHHostEntry, list_explicit_ssh_entries, read_ssh_host_entry, update_ssh_port_for_hosts
 from .transport import (
+    CpolarStatusEntry,
     download_remote_archive,
+    fetch_cpolar_status_entries,
     open_vscode_remote,
+    resolve_cpolar_port,
     resolve_connection_port,
     should_exclude_by_pattern,
     sync_upload,
@@ -131,7 +134,8 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "远程同步命令行工具\n\n"
             "命令名称:\n"
             "  sync-remote  完整命令名\n"
-            "  sr           简写别名"
+            "  sr           简写别名\n\n"
+            "项目内命令用于同步目录；`port-sync` 可在任何目录刷新 SSH 端口"
         ),
         epilog=(
             "常用示例:\n"
@@ -139,16 +143,18 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "  sync-remote upload --dry-run\n"
             "  sr upload\n"
             "  sr up\n"
+            "  sr doctor\n"
             "  sr switch gpu-b\n"
             "  sync-remote download\n"
             "  sr dl\n"
             "  sr upload-all-gpu\n"
-            "  sr version\n"
-            "  sr update --channel release\n"
             "  sync-remote open\n"
             "  sr op\n"
             "  sync-remote watch\n"
-            "  sr wt"
+            "  sr wt\n"
+            "  sr port-sync --hostname gpu-a.internal\n"
+            "  sr version\n"
+            "  sr update --channel release"
         ),
         formatter_class=HelpFormatter,
     )
@@ -410,7 +416,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         description=(
             "显示当前安装版本号。\n"
             "可执行命令: `sync-remote version` 或 `sr version`\n\n"
-            "若当前安装来自 main 通道，会显示类似 `0.4.3-main-YYYY-MM-DD` 的展示版本。"
+            "若当前安装来自 main 通道，会显示类似 `0.5.0-main-YYYY-MM-DD` 的展示版本。"
         ),
         formatter_class=HelpFormatter,
     )
@@ -437,6 +443,43 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         choices=["main", "release"],
         metavar="{main,release}",
         help="指定更新通道；默认根据当前版本和最新 Release 自动选择",
+    )
+
+    port_sync = subparsers.add_parser(
+        "port-sync",
+        add_help=False,
+        help="在任何目录直接更新 ~/.ssh/config 中的端口",
+        description=(
+            "在任何目录直接更新 ~/.ssh/config 中的端口。\n"
+            "不会读取或生成 `sync-remote.yaml`。\n"
+            "默认读取 ~/.env 中的 CPOLAR_USER 和 CPOLAR_PASS 登录 cpolar。\n"
+            "若不显式传 --tunnel，则默认使用 SSH 配置块中的 User 作为 tunnel 名。\n"
+            "若 cpolar 中存在同名 tunnel，会按 hostname 精确匹配端口。"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr port-sync\n"
+            "  sr port-sync --hostname gpu-a.internal\n"
+            "  sr port-sync --hostname gpu-a.internal --user alice\n"
+            "  sr port-sync --hostname gpu-a.internal --tunnel pc3048"
+        ),
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(port_sync)
+    port_sync.add_argument(
+        "--hostname",
+        metavar="HOSTNAME",
+        help="按 SSH HostName 过滤要更新的目标",
+    )
+    port_sync.add_argument(
+        "--user",
+        metavar="USER",
+        help="按 SSH User 过滤要更新的目标",
+    )
+    port_sync.add_argument(
+        "--tunnel",
+        metavar="TUNNEL",
+        help="显式指定 cpolar tunnel 名；不传时默认使用 SSH User",
     )
 
     status = subparsers.add_parser(
@@ -537,6 +580,10 @@ def _ssh_config_file(config) -> Path:
     return Path(expand_user_path(config.connection.ssh_config_path))
 
 
+def _default_ssh_config_path() -> Path:
+    return Path(expand_user_path("~/.ssh/config"))
+
+
 def _ssh_private_key_file(config) -> Path:
     return Path(expand_user_path(config.connection.ssh_key_path))
 
@@ -563,6 +610,175 @@ def _resolve_remote_dir(config) -> str:
 def _ssh_alias_status(config) -> str:
     entry = read_ssh_host_entry(_ssh_config_file(config), config.connection.host)
     return "OK" if entry is not None else "MISSING"
+
+
+def _filter_port_sync_entries(
+    entries: list[SSHHostEntry],
+    *,
+    hostname: str | None,
+    user: str | None,
+) -> list[SSHHostEntry]:
+    filtered_entries = list(entries)
+    if hostname:
+        filtered_entries = [
+            entry
+            for entry in filtered_entries
+            if entry.hostname and entry.hostname.casefold() == hostname.casefold()
+        ]
+    if user:
+        filtered_entries = [
+            entry
+            for entry in filtered_entries
+            if entry.user and entry.user.casefold() == user.casefold()
+        ]
+    return filtered_entries
+
+
+def _select_port_sync_entry(entries: list[SSHHostEntry]) -> SSHHostEntry | None:
+    if not entries:
+        return None
+
+    print("可用 SSH Host：")
+    for index, entry in enumerate(entries, start=1):
+        print(
+            f"  {index}. {entry.host} "
+            f"(hostname={entry.hostname or '<none>'}, user={entry.user or '<none>'}, port={entry.port or '<none>'})"
+        )
+
+    selection = input("选择要更新的 SSH Host [1]: ").strip() or "1"
+    try:
+        selected_index = int(selection)
+    except ValueError:
+        print(f"无效选择: {selection}")
+        return None
+    if not 1 <= selected_index <= len(entries):
+        print(f"无效选择: {selection}")
+        return None
+    return entries[selected_index - 1]
+
+
+def _resolve_port_sync_targets(
+    entries: list[SSHHostEntry],
+    cpolar_entries: list[CpolarStatusEntry],
+    *,
+    tunnel_override: str | None,
+) -> tuple[list[tuple[tuple[str, ...], str, str, str]], list[str]]:
+    grouped_by_hostname: dict[str, list[SSHHostEntry]] = {}
+    messages: list[str] = []
+
+    for entry in entries:
+        if not entry.hostname:
+            messages.append(f"{entry.host}: 缺少 HostName，无法匹配 cpolar")
+            continue
+        grouped_by_hostname.setdefault(entry.hostname, []).append(entry)
+
+    targets: list[tuple[tuple[str, ...], str, str, str]] = []
+    for hostname, group in grouped_by_hostname.items():
+        if tunnel_override:
+            tunnel_name = tunnel_override
+        else:
+            user_values = {entry.user.strip() for entry in group if entry.user.strip()}
+            if len(user_values) > 1:
+                host_list = ", ".join(entry.host for entry in group)
+                messages.append(f"{hostname} 命中了多个不同 SSH User ({host_list})，请使用 --user、--tunnel 或交互选择")
+                continue
+            if not user_values:
+                host_list = ", ".join(entry.host for entry in group)
+                messages.append(f"{hostname} 对应的 SSH Host ({host_list}) 缺少 User，无法推断 tunnel，请使用 --tunnel")
+                continue
+            tunnel_name = next(iter(user_values))
+
+        try:
+            port = resolve_cpolar_port(
+                cpolar_entries,
+                tunnel_name=tunnel_name,
+                hostname=hostname,
+            )
+        except RuntimeError as exc:
+            messages.append(str(exc))
+            continue
+
+        if not port:
+            messages.append(f"cpolar 中未找到 hostname={hostname} tunnel={tunnel_name}")
+            continue
+
+        targets.append(
+            (
+                tuple(dict.fromkeys(entry.host for entry in group)),
+                hostname,
+                tunnel_name,
+                port,
+            )
+        )
+
+    return targets, messages
+
+
+def _apply_port_sync_targets(ssh_config_path: Path, targets: list[tuple[tuple[str, ...], str, str, str]]) -> None:
+    print("SSH 端口已更新:")
+    for hosts, hostname, tunnel_name, port in targets:
+        update_ssh_port_for_hosts(ssh_config_path, hosts=hosts, new_port=port)
+        print(f"  - {', '.join(hosts)} -> {hostname}:{port} (tunnel={tunnel_name})")
+
+
+def _handle_port_sync(args: argparse.Namespace) -> int:
+    ssh_config_path = _default_ssh_config_path()
+    if not ssh_config_path.exists():
+        print(f"未找到 SSH 配置文件: {ssh_config_path}")
+        return 1
+
+    entries = list_explicit_ssh_entries(ssh_config_path)
+    if not entries:
+        print(f"在 {ssh_config_path} 中未找到可用的显式 Host")
+        return 1
+
+    filtered_entries = _filter_port_sync_entries(entries, hostname=args.hostname, user=args.user)
+    if not filtered_entries:
+        print("没有找到匹配的 SSH Host，请检查 --hostname 或 --user")
+        return 1
+
+    try:
+        cpolar_entries = fetch_cpolar_status_entries()
+    except RuntimeError as exc:
+        print(exc)
+        return 1
+
+    targets, messages = _resolve_port_sync_targets(filtered_entries, cpolar_entries, tunnel_override=args.tunnel)
+    if targets:
+        _apply_port_sync_targets(ssh_config_path, targets)
+        for message in messages:
+            print(message)
+        return 0
+
+    if not args.hostname and not args.user and not args.tunnel and sys.stdin.isatty():
+        selected_entry = _select_port_sync_entry(filtered_entries)
+        if selected_entry is None:
+            return 1
+        selection_entries = [
+            entry
+            for entry in filtered_entries
+            if entry.hostname == selected_entry.hostname
+            and (args.tunnel is not None or entry.user == selected_entry.user)
+        ]
+        selected_targets, selected_messages = _resolve_port_sync_targets(
+            selection_entries,
+            cpolar_entries,
+            tunnel_override=args.tunnel,
+        )
+        if selected_targets:
+            _apply_port_sync_targets(ssh_config_path, selected_targets)
+            for message in messages:
+                print(message)
+            for message in selected_messages:
+                print(message)
+            return 0
+        messages.extend(selected_messages)
+    elif not args.hostname and not args.user and not args.tunnel:
+        messages.append("自动匹配失败，且当前不是交互终端；请使用 --hostname、--user 或 --tunnel 指定目标")
+
+    for message in messages:
+        print(message)
+    return 1
 
 
 def _cpolar_env_status(config) -> str:
@@ -1113,6 +1329,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_status()
     if args.command == "doctor":
         return _handle_doctor()
+    if args.command == "port-sync":
+        return _handle_port_sync(args)
 
     parser.print_help()
     return 1

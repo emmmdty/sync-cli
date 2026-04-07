@@ -14,7 +14,16 @@ from sync_remote.config import (
     ProjectSettings,
     SyncSettings,
 )
-from sync_remote.transport import build_rsync_command, download_remote_archive, sync_upload_archive, sync_upload_rsync
+from sync_remote.transport import (
+    CpolarStatusEntry,
+    build_rsync_command,
+    download_remote_archive,
+    get_port_from_cpolar,
+    parse_cpolar_status_entries,
+    resolve_cpolar_port,
+    sync_upload_archive,
+    sync_upload_rsync,
+)
 
 
 def build_config(*, excludes: tuple[str, ...] = (".git",), max_file_size_mb: int = 50) -> ProjectConfig:
@@ -38,6 +47,36 @@ def build_config(*, excludes: tuple[str, ...] = (".git",), max_file_size_mb: int
     )
 
 
+class FakeResponse:
+    def __init__(self, *, status_code: int = 200, url: str = "", text: str = "") -> None:
+        self.status_code = status_code
+        self.url = url
+        self.text = text
+
+
+class FakeCpolarSession:
+    def __init__(self, status_html: str) -> None:
+        self.status_html = status_html
+
+    def __enter__(self) -> FakeCpolarSession:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def get(self, url: str, headers=None, timeout: int = 10) -> FakeResponse:
+        if url.endswith("/login"):
+            return FakeResponse(status_code=200, url=url)
+        if url.endswith("/status"):
+            return FakeResponse(status_code=200, url=url, text=self.status_html)
+        raise AssertionError(f"unexpected GET {url}")
+
+    def post(self, url: str, data=None, headers=None, timeout: int = 10) -> FakeResponse:
+        if url.endswith("/login"):
+            return FakeResponse(status_code=200, url="https://dashboard.cpolar.com/dashboard")
+        raise AssertionError(f"unexpected POST {url}")
+
+
 def test_build_rsync_command_does_not_use_append_verify() -> None:
     command = build_rsync_command(
         build_config(),
@@ -49,6 +88,122 @@ def test_build_rsync_command_does_not_use_append_verify() -> None:
 
     assert "--append-verify" not in command
     assert "--modify-window=-1" in command
+
+
+def test_parse_cpolar_status_entries_extracts_tunnel_hostname_and_port() -> None:
+    status_html = """
+    <table>
+      <tr><td>pc3048</td><td><a>tcp://gpu-a.internal:43001</a></td></tr>
+      <tr><td>release</td><td><a>tcp://gpu-b.internal:43002</a></td></tr>
+    </table>
+    """
+
+    assert parse_cpolar_status_entries(status_html) == [
+        CpolarStatusEntry(tunnel_name="pc3048", hostname="gpu-a.internal", port="43001"),
+        CpolarStatusEntry(tunnel_name="release", hostname="gpu-b.internal", port="43002"),
+    ]
+
+
+def test_resolve_cpolar_port_raises_for_conflicting_duplicate_ports() -> None:
+    entries = [
+        CpolarStatusEntry(tunnel_name="pc3048", hostname="gpu-a.internal", port="43001"),
+        CpolarStatusEntry(tunnel_name="pc3048", hostname="gpu-a.internal", port="43002"),
+    ]
+
+    with pytest.raises(RuntimeError, match="多个不同端口"):
+        resolve_cpolar_port(entries, tunnel_name="pc3048", hostname="gpu-a.internal")
+
+
+def test_get_port_from_cpolar_prefers_matching_hostname_when_tunnel_names_repeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status_html = """
+    <table>
+      <tr><td>pc3048</td><td><a>tcp://old-host.example.tcp.vip.cpolar.cn:41001</a></td></tr>
+      <tr><td>pc3048</td><td><a>tcp://new-host.example.tcp.vip.cpolar.cn:41002</a></td></tr>
+    </table>
+    """
+    updated_ports: list[str] = []
+
+    monkeypatch.setenv("CPOLAR_USER", "user")
+    monkeypatch.setenv("CPOLAR_PASS", "pass")
+    monkeypatch.setattr(
+        "sync_remote.transport.requests.Session",
+        lambda: FakeCpolarSession(status_html),
+    )
+    monkeypatch.setattr(
+        "sync_remote.transport.update_ssh_port_in_config",
+        lambda port, config: updated_ports.append(port),
+    )
+
+    config = build_config()
+    config = ProjectConfig(
+        version=config.version,
+        project=config.project,
+        connection=ConnectionSettings(
+            user=config.connection.user,
+            host=config.connection.host,
+            hostname="new-host.example.tcp.vip.cpolar.cn",
+            port_mode="auto",
+            port=None,
+            ssh_config_path=config.connection.ssh_config_path,
+            ssh_key_path=config.connection.ssh_key_path,
+            known_hosts_check=config.connection.known_hosts_check,
+            auth_mode=config.connection.auth_mode,
+        ),
+        cpolar=CpolarSettings(tunnel_name="pc3048", env_path=config.cpolar.env_path),
+        sync=config.sync,
+        backup=config.backup,
+    )
+
+    assert get_port_from_cpolar(config) == "41002"
+    assert updated_ports == ["41002"]
+
+
+def test_get_port_from_cpolar_returns_none_when_duplicate_tunnel_names_do_not_match_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status_html = """
+    <table>
+      <tr><td>pc3048</td><td><a>tcp://old-host.example.tcp.vip.cpolar.cn:41001</a></td></tr>
+      <tr><td>pc3048</td><td><a>tcp://other-host.example.tcp.vip.cpolar.cn:41003</a></td></tr>
+    </table>
+    """
+    updated_ports: list[str] = []
+
+    monkeypatch.setenv("CPOLAR_USER", "user")
+    monkeypatch.setenv("CPOLAR_PASS", "pass")
+    monkeypatch.setattr(
+        "sync_remote.transport.requests.Session",
+        lambda: FakeCpolarSession(status_html),
+    )
+    monkeypatch.setattr(
+        "sync_remote.transport.update_ssh_port_in_config",
+        lambda port, config: updated_ports.append(port),
+    )
+
+    config = build_config()
+    config = ProjectConfig(
+        version=config.version,
+        project=config.project,
+        connection=ConnectionSettings(
+            user=config.connection.user,
+            host=config.connection.host,
+            hostname="missing-host.example.tcp.vip.cpolar.cn",
+            port_mode="auto",
+            port=None,
+            ssh_config_path=config.connection.ssh_config_path,
+            ssh_key_path=config.connection.ssh_key_path,
+            known_hosts_check=config.connection.known_hosts_check,
+            auth_mode=config.connection.auth_mode,
+        ),
+        cpolar=CpolarSettings(tunnel_name="pc3048", env_path=config.cpolar.env_path),
+        sync=config.sync,
+        backup=config.backup,
+    )
+
+    assert get_port_from_cpolar(config) is None
+    assert updated_ports == []
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required for this regression test")

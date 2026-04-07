@@ -13,6 +13,7 @@ def test_top_level_help_mentions_both_command_names_and_examples(capsys) -> None
     captured = capsys.readouterr()
     assert "usage: sync-remote" in captured.out
     assert "远程同步命令行工具" in captured.out
+    assert "项目内命令用于同步目录；`port-sync` 可在任何目录刷新 SSH 端口" in captured.out
     assert "sync-remote  完整命令名" in captured.out
     assert "sr           简写别名" in captured.out
     assert "upload (up)" in captured.out
@@ -33,6 +34,8 @@ def test_top_level_help_mentions_both_command_names_and_examples(capsys) -> None
     assert "upload-all-gpu" in captured.out
     assert "version" in captured.out
     assert "update" in captured.out
+    assert "port-sync" in captured.out
+    assert "sr port-sync" in captured.out
 
 
 def test_init_help_explains_generated_config_and_modes(capsys) -> None:
@@ -158,6 +161,21 @@ def test_doctor_help_describes_checks(capsys) -> None:
     assert "适合在首次联机前排查环境问题" in captured.out
 
 
+def test_port_sync_help_describes_yaml_free_ssh_update(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["port-sync", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote port-sync" in captured.out
+    assert "在任何目录直接更新 ~/.ssh/config 中的端口" in captured.out
+    assert "不会读取或生成 `sync-remote.yaml`" in captured.out
+    assert "若 cpolar 中存在同名 tunnel，会按 hostname 精确匹配端口" in captured.out
+    assert "--hostname" in captured.out
+    assert "--user" in captured.out
+    assert "--tunnel" in captured.out
+
+
 def test_switch_help_describes_default_host_switching(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["switch", "--help"])
@@ -201,7 +219,7 @@ def test_version_help_describes_current_version_output(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote version" in captured.out
     assert "显示当前安装版本号" in captured.out
-    assert "0.4.3-main-YYYY-MM-DD" in captured.out
+    assert "0.5.0-main-YYYY-MM-DD" in captured.out
 
 
 def test_update_help_describes_channels(capsys) -> None:

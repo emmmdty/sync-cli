@@ -1,364 +1,163 @@
 # sync-remote
 
-远程同步命令行工具，用来把当前项目目录同步到远端服务器，并提供下载、备份、环境检查、实时同步、VS Code Remote 打开和自更新能力。
+把本地项目目录同步到远端 Linux 服务器的命令行工具。它适合已经能用 SSH 登录服务器，但不想每次都手写 `rsync`、`scp`、打包下载和端口更新命令的人。
 
-主命令是 `sync-remote`，同时提供简写别名 `sr`。
+主命令是 `sync-remote`，简写别名是 `sr`。
 
-## 适用场景
+## 这工具能做什么
 
-- 需要在本地项目目录和远端开发机之间高频同步代码
-- 已经使用 SSH 或 VS Code Remote SSH，希望把日常同步流程命令化
-- 同时维护多台服务器，希望在同一份项目配置里切换默认目标或批量上传
-- 远端 SSH 端口可能通过 Cpolar 等隧道动态变化
-- 希望在任意项目目录里快速初始化配置，而不是复制脚本到每个仓库
+- 在项目目录生成 `sync-remote.yaml`，然后用一条命令上传、下载、打开远端目录、持续同步
+- 给同一个项目维护多台服务器，并切换默认目标
+- 在真正上传前，先用 `doctor` 和 `status` 看清楚当前会连到哪台机器
+- 在任何目录直接更新 `~/.ssh/config` 的端口，适配 Cpolar 动态端口
 
-## 功能特性
+## 两种使用方式
 
-- `init` 会生成或更新当前目录的 `sync-remote.yaml`
-- 已有配置时再次执行 `init` 会追加服务器，并把新服务器设为默认值
-- 支持 `switch`、`del`、`status` 管理多服务器配置
-- `upload`、`download`、`open`、`watch`、`doctor` 默认都作用于当前默认服务器
-- `upload --hosts` 可一次上传到一个或多个指定服务器
-- `upload-all-gpu` 会并发上传到配置中的所有服务器，失败不会中断后续任务
-- 支持 `key` 和 `password` 两种认证模式
-- 支持 `auto` 和 `fixed` 两种 SSH 端口模式
-- 支持 `version` 查看当前版本，`update` 从 GitHub 自更新
-- 兼容旧入口 `sync_to_remote.py`
+### 项目内命令
+
+先在项目目录运行 `sr init`，会生成 `sync-remote.yaml`。后续这套命令都围绕当前项目工作：
+
+- `sr init`
+- `sr doctor`
+- `sr status`
+- `sr up`
+- `sr dl`
+- `sr op`
+- `sr watch`
+- `sr switch`
+
+### 任意目录命令
+
+`sr port-sync` 不依赖项目 YAML。在任何目录都可以直接读取 `~/.ssh/config` 和 `~/.env`，把命中的 SSH `Port` 更新成当前的 Cpolar 端口。
 
 ## 安装
 
-### 本地安装
+### 推荐安装
 
 ```bash
-uv tool install .
+uv tool install git+https://github.com/emmmdty/sync-cli.git
 ```
 
-### 开发态安装
+安装完成后可直接运行：
 
 ```bash
-uv tool install --editable .
+sr --help
+sr version
 ```
 
-### 仓库内直接运行
+### 在仓库里开发或本地调试
 
 ```bash
-uv run sync-remote --help
+git clone https://github.com/emmmdty/sync-cli.git
+cd sync-cli
+uv sync --group dev
 uv run sr --help
 ```
 
-## 首次使用前准备
-
-必须准备：
+## 使用前准备
 
 - `Python 3.10+`
 - `uv`
 - `ssh`
-- 本机 SSH 私钥和公钥
-- 远端服务器已写入你的公钥
+- 你的 SSH 公钥已经放到远端服务器上，能先手动 `ssh <host>` 登录
+- 如果你要自动同步 Cpolar 端口，需要 `~/.env` 中存在 `CPOLAR_USER` 和 `CPOLAR_PASS`
+- 如果你要用 `open`，本机需要 VS Code 和 `code` 命令
+- 如果你要用 `password` 认证模式，本机需要 `sshpass`
+- 如果你想获得更快的增量上传，建议安装 `rsync`
 
-按需准备：
+## 5 分钟上手
 
-- 使用 `open` 时需要 VS Code 和 `code` 命令
-- 希望获得更好的增量上传体验时建议安装 `rsync`
-- 使用 `password` 认证模式时需要安装 `sshpass`
-- 使用 `auto` 端口模式时需要准备含 `CPOLAR_USER` 和 `CPOLAR_PASS` 的环境变量文件
-
-推荐首次检查顺序：
+1. 先确认 SSH 本身能连上：
 
 ```bash
-sr --help
-sr init
-sr doctor
-sr status
+ssh gpu-a
 ```
 
-## 快速开始
-
-1. 初始化或追加当前目录的服务器配置：
+2. 进入你的项目目录，初始化配置：
 
 ```bash
 sr init
 ```
 
-2. 检查默认服务器和本机依赖：
+3. 先做环境和配置检查：
 
 ```bash
-sr status
 sr doctor
+sr status
 ```
 
-3. 上传到当前默认服务器：
+4. 上传当前项目：
 
 ```bash
 sr up
 ```
 
-4. 切换默认服务器后再次上传：
+5. 如果你维护多台机器，切换默认服务器后再次上传：
 
 ```bash
 sr switch gpu-b
 sr up
 ```
 
-5. 上传到所有已配置服务器：
+## 快速更新 SSH 端口
 
-```bash
-sr upload-all-gpu
-```
-
-6. 只上传到指定服务器：
-
-```bash
-sr up --hosts gpu-a gpu-b
-```
-
-7. 查看版本并按 Release 通道更新：
-
-```bash
-sr version
-sr update --channel release
-```
-
-## 命令一览
-
-| 功能 | 长命令 | 简写 |
-| --- | --- | --- |
-| 初始化或追加服务器 | `sync-remote init` | `sr init` |
-| 上传 | `sync-remote upload` | `sr up` |
-| 下载 | `sync-remote download` | `sr dl` |
-| 备份 | `sync-remote backup` | `sr backup` |
-| 打开远端目录 | `sync-remote open` | `sr op` |
-| 实时同步 | `sync-remote watch` | `sr wt` |
-| 切换默认服务器 | `sync-remote switch` | `sr switch` |
-| 删除服务器 | `sync-remote del` | `sr del` |
-| 上传到所有服务器 | `sync-remote upload-all-gpu` | `sr upload-all-gpu` |
-| 查看版本 | `sync-remote version` | `sr version` |
-| 自动更新 | `sync-remote update` | `sr update` |
-| 查看配置状态 | `sync-remote status` | `sr status` |
-| 环境自检 | `sync-remote doctor` | `sr doctor` |
-
-更多参数说明可直接查看帮助：
-
-```bash
-sync-remote --help
-sync-remote upload --help
-sync-remote switch --help
-sync-remote update --help
-```
-
-## 配置说明
-
-运行 `sync-remote init` 后，会在当前目录生成或更新 `sync-remote.yaml`。
-
-- `init` 会优先扫描本机 `~/.ssh/config`，可直接复用已有 Host，也可在流程中新增 Host
-- 如果当前目录已经有配置，再次执行 `init` 会追加新的服务器，并把最后追加的 Host 设为 `default_host`
-- 每个 `server` 都有自己的远端目录配置，追加 Host 时不再默认和其他 Host 共用同一个远端目录
-- `upload`、`download`、`open`、`watch`、`doctor` 都读取 `default_host`
-- `switch` 只切换默认服务器，不改其他配置
-- `del` 删除指定服务器；删除默认服务器时，会把最后一个剩余服务器设为默认
-- 读取顺序是 `sync-remote.yaml` 优先，找不到时回退到旧配置 `sync_config.yaml`
-- 旧版单服务器配置仍可读取，但新的写回结构统一是 `version: 2`
-
-端口模式：
-
-- `auto`：优先从 Cpolar 获取端口，失败时回退 `~/.ssh/config`；解析成功后会同步更新 YAML 和 `~/.ssh/config` 中对应 Host 的端口
-- `fixed`：直接使用配置中的固定端口，不访问 Cpolar
-
-远端目录默认由两部分组成：
-
-- `servers.<host>.remote_base_dir`
-- 当前工作目录名
-
-例如当前目录名为 `demo-project`，某台服务器的远端基础目录为 `/srv/projects`，则该服务器默认远端目录为：
-
-```text
-/srv/projects/demo-project
-```
-
-### `version: 2` 多服务器示例
-
-```yaml
-version: 2
-project:
-  remote_base_dir: /srv/gpu-b
-  append_project_dir: true
-default_host: gpu-b
-servers:
-  gpu-a:
-    remote_base_dir: /srv/gpu-a
-    append_project_dir: true
-    user: alice
-    host: gpu-a
-    hostname: gpu-a.internal
-    port_mode: fixed
-    port: 2222
-    ssh_config_path: ~/.ssh/config
-    ssh_key_path: ~/.ssh/id_ed25519
-    known_hosts_check: true
-    auth_mode: key
-    cpolar:
-      tunnel_name: ""
-      env_path: ~/.env
-  gpu-b:
-    remote_base_dir: /srv/gpu-b
-    append_project_dir: true
-    user: bob
-    host: gpu-b
-    hostname: example.tcp.vip.cpolar.cn
-    port_mode: auto
-    port: null
-    ssh_config_path: ~/.ssh/config
-    ssh_key_path: ~/.ssh/id_ed25519
-    known_hosts_check: true
-    auth_mode: password
-    cpolar:
-      tunnel_name: prod-tunnel
-      env_path: ~/.env.prod
-sync:
-  transport: rsync
-  max_file_size_mb: 50
-  excludes:
-    - .git
-    - .venv
-backup:
-  excludes:
-    - .git
-    - .venv
-```
-
-上面这份配置里：
-
-- `sr up`、`sr status`、`sr doctor` 默认都会走 `gpu-b`
-- `sr switch gpu-a` 会把默认服务器切到 `gpu-a`
-- `sr del gpu-b` 会删除 `gpu-b` 并把剩余服务器设为默认
-- `sr up --hosts gpu-a gpu-b` 会并发上传到 `gpu-a` 和 `gpu-b`
-- `sr upload-all-gpu` 会并发上传到所有已配置服务器
-- 顶层 `project.*` 是当前 `default_host` 的镜像值，真正按 host 生效的目录配置在 `servers.<host>.*`
-
-如果你同时维护 `~/.ssh/config`，可写成：
+假设你的 `~/.ssh/config` 中有这一段：
 
 ```sshconfig
 Host gpu-a
   HostName gpu-a.internal
-  User alice
-  Port 2222
-  IdentityFile ~/.ssh/id_ed25519
-
-Host gpu-b
-  HostName example.tcp.vip.cpolar.cn
-  User bob
+  User pc3048
   Port 22
-  IdentityFile ~/.ssh/id_ed25519
 ```
 
-## 典型工作流
-
-### 上传到默认服务器
+当 Cpolar 端口变化后，可以在任何目录执行：
 
 ```bash
-sr up
+sr port-sync --hostname gpu-a.internal
 ```
 
-### 仅预览上传内容
+默认会把 SSH 配置块里的 `User` 当成 Cpolar tunnel 名来匹配。
+
+如果你的 SSH `User` 不是 cpolar tunnel 名，请显式传 `--tunnel`：
 
 ```bash
-sr up --dry-run
+sr port-sync --hostname gpu-a.internal --tunnel pc3048
 ```
 
-### 切换默认服务器
+如果 cpolar 中存在多个同名 tunnel，工具会继续按 hostname 精确匹配，不会误取第一条。
 
-```bash
-sr switch
-sr switch gpu-a
-```
+## 常用命令
 
-### 删除某台服务器
+| 场景 | 命令 |
+| --- | --- |
+| 初始化当前项目配置 | `sr init` |
+| 查看当前项目配置和端口解析结果 | `sr status` |
+| 做环境排查 | `sr doctor` |
+| 上传当前项目到默认服务器 | `sr up` |
+| 下载远端目录压缩包 | `sr dl` |
+| 上传后用 VS Code 打开远端目录 | `sr op` |
+| 持续监听本地改动并同步 | `sr watch` |
+| 切换默认服务器 | `sr switch <host>` |
+| 上传到所有已配置服务器 | `sr upload-all-gpu` |
+| 备份当前目录 | `sr backup` |
+| 在任何目录更新 SSH 端口 | `sr port-sync --hostname gpu-a.internal` |
+| 查看当前版本 | `sr version` |
+| 更新到最新 Release | `sr update --channel release` |
 
-```bash
-sr del
-sr del gpu-b
-```
+## 下一步看哪里
 
-### 下载远端快照
+- [完整使用手册](docs/usage.md)
+- [MIT License](LICENSE)
 
-```bash
-sr dl
-```
-
-### 上传后打开远端目录
-
-```bash
-sr op
-```
-
-### 持续监听本地改动
-
-```bash
-sr watch
-sync-remote open --watch
-```
-
-### 批量上传到所有服务器
-
-```bash
-sr upload-all-gpu
-```
-
-### 批量上传到指定服务器
-
-```bash
-sr up --hosts gpu-a gpu-b
-```
-
-### 查看版本并自更新
+## 更新
 
 ```bash
 sr version
-sr update
-sr update --channel main
 sr update --channel release
 ```
 
-`update` 只支持通过 `uv tool install` 或 `uv tool install --editable` 安装的命令自动更新。  
-如果当前是仓库内 `uv run`、源码直接执行或其他安装方式，命令会给出手动更新指令，不会原地改写当前源码目录。
-
-## 兼容旧入口
-
-仓库仍保留 `sync_to_remote.py`，但它本身只是兼容包装层，会把旧调用方式转发到新的 `sync-remote` CLI。
-
-推荐直接使用：
-
-- `sync-remote`
-- `sr`
-
-例如下面这些旧用法仍然可以继续工作：
+如果你当前不是通过 `uv tool install` 安装，也可以手动更新：
 
 ```bash
-python sync_to_remote.py
-python sync_to_remote.py upload
-python sync_to_remote.py switch gpu-b
+uv tool install --upgrade git+https://github.com/emmmdty/sync-cli.git@v0.5.0
 ```
-
-## 开发与测试
-
-安装开发依赖：
-
-```bash
-uv sync --locked --group dev
-```
-
-运行测试：
-
-```bash
-uv run pytest -q
-```
-
-构建包：
-
-```bash
-uv build
-```
-
-## 许可证
-
-本项目使用 MIT License。
