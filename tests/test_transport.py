@@ -18,6 +18,7 @@ from sync_remote.transport import (
     build_rsync_command,
     download_remote_archive,
     get_port_from_cpolar,
+    normalize_sync_paths,
     sync_upload_archive,
     sync_upload_rsync,
 )
@@ -166,6 +167,26 @@ def test_sync_upload_rsync_sync_path_directory_preserves_excludes(tmp_path: Path
 
     assert result is True
     assert captured["excludes"] == ("*.log",)
+
+
+def test_normalize_sync_paths_accepts_windows_style_relative_separators(tmp_path: Path) -> None:
+    project_dir = tmp_path / "demo"
+    src_dir = project_dir / "src"
+    src_dir.mkdir(parents=True)
+    target = src_dir / "app.py"
+    target.write_text("print('hi')\n", encoding="utf-8")
+
+    normalized = normalize_sync_paths(project_dir, ("src\\app.py",), require_exists=True)
+
+    assert normalized == [("src/app.py", target.resolve())]
+
+
+def test_normalize_sync_paths_rejects_windows_absolute_paths_with_wsl_hint(tmp_path: Path) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+
+    with pytest.raises(ValueError, match="Windows 绝对路径"):
+        normalize_sync_paths(project_dir, ("C:\\Users\\alice\\demo\\src\\app.py",), require_exists=False)
 
 
 def test_sync_upload_archive_uses_current_directory_when_remote_parent_is_empty(

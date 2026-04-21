@@ -224,12 +224,23 @@ def build_rsync_ssh_command(config: ProjectConfig, port: str) -> str:
     return " ".join(shlex.quote(part) for part in ssh_cmd)
 
 
+def _normalize_user_sync_path(raw_path: str) -> str:
+    candidate = raw_path.strip()
+    if re.match(r"^[A-Za-z]:[\\/]", candidate):
+        raise ValueError(
+            f"Windows 绝对路径不受支持: {raw_path}；请在 WSL 中使用项目相对路径或 /mnt/<盘符>/... 路径"
+        )
+    return candidate.replace("\\", "/")
+
+
 def normalize_sync_paths(base_dir: Path | str, raw_paths: tuple[str, ...], *, require_exists: bool) -> list[tuple[str, Path]]:
     root = Path(base_dir).resolve()
     results: list[tuple[str, Path]] = []
 
     for raw_path in raw_paths:
-        candidate = (root / raw_path).resolve()
+        normalized_path = _normalize_user_sync_path(raw_path)
+        candidate_path = Path(normalized_path)
+        candidate = candidate_path.resolve() if candidate_path.is_absolute() else (root / normalized_path).resolve()
         if root not in candidate.parents and candidate != root:
             raise ValueError(f"路径超出项目目录: {raw_path}")
         if require_exists and not candidate.exists():
@@ -424,9 +435,14 @@ def sync_upload_rsync(
     print(f"远程: {build_remote_identity(config)}:{remote_dir}")
 
     if sync_paths:
+        try:
+            normalized_sync_paths = normalize_sync_paths(local_dir, sync_paths, require_exists=True)
+        except (FileNotFoundError, ValueError) as exc:
+            print(exc)
+            return False
         selected_paths = filter_sync_paths(
             local_dir,
-            normalize_sync_paths(local_dir, sync_paths, require_exists=True),
+            normalized_sync_paths,
             excludes=excludes,
             max_size_bytes=max_size_bytes,
         )

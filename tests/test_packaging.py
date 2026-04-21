@@ -85,6 +85,31 @@ def test_repository_has_readme_license_and_gitignore() -> None:
     assert "sync_config.yaml" in gitignore_content
 
 
+def test_repository_has_phase3_docs_and_english_readme() -> None:
+    readme_en = ROOT / "README.en.md"
+    troubleshooting = ROOT / "docs" / "TROUBLESHOOTING.md"
+    migration = ROOT / "docs" / "MIGRATION.md"
+    release_notes = ROOT / "docs" / "RELEASE_NOTES.md"
+
+    assert readme_en.exists()
+    assert troubleshooting.exists()
+    assert migration.exists()
+    assert release_notes.exists()
+
+    readme_content = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme_en_content = readme_en.read_text(encoding="utf-8")
+    troubleshooting_content = troubleshooting.read_text(encoding="utf-8")
+    migration_content = migration.read_text(encoding="utf-8")
+    release_notes_content = release_notes.read_text(encoding="utf-8")
+
+    assert "English quickstart: [README.en.md](README.en.md)" in readme_content
+    assert "# sync-remote (English)" in readme_en_content
+    assert "SSH-first remote development sync CLI" in readme_en_content
+    assert "## 故障排查" in troubleshooting_content
+    assert "## Migration" in migration_content
+    assert "## Release Checklist" in release_notes_content
+
+
 def test_repository_does_not_keep_local_project_config_files() -> None:
     assert not (ROOT / "sync-remote.yaml").exists()
     assert not (ROOT / "sync_config.yaml").exists()
