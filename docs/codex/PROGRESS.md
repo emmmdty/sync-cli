@@ -17,14 +17,14 @@
   - fresh-worktree `uv sync` is blocked in this sandbox because the lockfile registry points to a network mirror; phase verification uses the existing repo `.venv` plus worktree `PYTHONPATH`.
 
 ## Active phase
-- Phase: Phase 2
-- Branch: `codex/phase-02-cli-config`
-- Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/codex-main-integration/.worktrees/phase-02`
-- Goal: normalize the CLI and config surface around canonical `target` / `config` / `port-sync` flows while preserving compatibility aliases and documenting the v3 write format.
+- Phase: Phase 3 (pending)
+- Branch: `codex/phase-03-watch-docs` (to be created from clean `main`)
+- Worktree: pending creation from `/home/tjk/myProjects/sync-cli/.worktrees/codex-main-integration`
+- Goal: improve watch UX, read-only diagnostics ergonomics, and Chinese-first docs without widening the product boundary beyond SSH remote-development sync.
 - Planned acceptance:
   - full test suite passes
-  - help output covers canonical commands and compatibility aliases
-  - README documents the v3 config shape and explicit port-sync workflow
+  - watch and UX changes remain explicit and safe
+  - docs are coherent and bilingual enough for release readiness
 
 ## Completed phases
 
@@ -49,8 +49,8 @@
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_cli_init.py -q` -> `7 passed in 0.34s`
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_help.py tests/test_packaging.py -q` -> `21 passed in 0.64s`
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q` -> `82 passed in 2.47s`
-- Merge result:
-- Cleanup result:
+- Merge result: merged `codex/phase-02-cli-config` into integration `main`
+- Cleanup result: removed the `codex/phase-02-cli-config` worktree and deleted the phase branch
 
 ### Phase 3
 - Summary:
