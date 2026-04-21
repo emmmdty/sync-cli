@@ -29,10 +29,10 @@
 ## Completed phases
 
 ### Phase 0
-- Summary:
-- Tests:
-- Merge result:
-- Cleanup result:
+- Summary: added tracked `docs/codex/PHASES.md`, `docs/codex/PROGRESS_TEMPLATE.md`, and baseline `docs/codex/PROGRESS.md`; confirmed current command surface, config shape, test baseline, and known safety hazards.
+- Tests: `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q` -> `66 passed in 1.58s`
+- Merge result: merged `codex/phase-00-baseline` into integration `main`
+- Cleanup result: removed `codex/phase-00-baseline` worktree and deleted the phase branch
 
 ### Phase 1
 - Summary:
