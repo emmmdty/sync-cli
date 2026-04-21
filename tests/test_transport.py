@@ -14,7 +14,13 @@ from sync_remote.config import (
     ProjectSettings,
     SyncSettings,
 )
-from sync_remote.transport import build_rsync_command, download_remote_archive, sync_upload_archive, sync_upload_rsync
+from sync_remote.transport import (
+    build_rsync_command,
+    download_remote_archive,
+    get_port_from_cpolar,
+    sync_upload_archive,
+    sync_upload_rsync,
+)
 
 
 def build_config(*, excludes: tuple[str, ...] = (".git",), max_file_size_mb: int = 50) -> ProjectConfig:
@@ -233,3 +239,75 @@ def test_download_remote_archive_uses_current_directory_when_remote_parent_is_em
 
     assert result is True
     assert "cd ." in captured["remote_tar_command"]
+
+
+def test_get_port_from_cpolar_does_not_update_ssh_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ssh_config_path = tmp_path / "ssh_config"
+    ssh_config_path.write_text(
+        "Host gpu\n"
+        "  HostName gpu.internal\n"
+        "  User alice\n"
+        "  Port 22\n"
+        "  IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config = ProjectConfig(
+        version=1,
+        project=ProjectSettings(remote_base_dir="/srv/work", append_project_dir=True),
+        connection=ConnectionSettings(
+            user="alice",
+            host="gpu",
+            hostname="gpu.internal",
+            port_mode="auto",
+            port=None,
+            ssh_config_path=str(ssh_config_path),
+            ssh_key_path="~/.ssh/id_ed25519",
+            known_hosts_check=True,
+            auth_mode="key",
+        ),
+        cpolar=CpolarSettings(tunnel_name="gpu", env_path=str(tmp_path / ".env")),
+        sync=SyncSettings(transport="rsync", max_file_size_mb=50, excludes=(".git",)),
+        backup=BackupSettings(excludes=(".git", ".venv", ".*")),
+    )
+
+    class FakeResponse:
+        def __init__(self, *, status_code: int, url: str, text: str = "", payload=None):
+            self.status_code = status_code
+            self.url = url
+            self.text = text
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url, timeout=10, headers=None):
+            if url.endswith("/login"):
+                return FakeResponse(status_code=200, url=url)
+            return FakeResponse(
+                status_code=200,
+                url=url,
+                text=(
+                    "<tr><td>gpu</td><td>tcp://ignored</td>"
+                    "<td><a>example.tcp.vip.cpolar.cn:2300</a></td></tr>"
+                ),
+            )
+
+        def post(self, url, data=None, headers=None, timeout=10):
+            return FakeResponse(status_code=200, url="https://dashboard.cpolar.com/dashboard")
+
+    updated_ports: list[str] = []
+
+    monkeypatch.setenv("CPOLAR_USER", "user")
+    monkeypatch.setenv("CPOLAR_PASS", "pass")
+    monkeypatch.setattr("sync_remote.transport.requests.Session", lambda: FakeSession())
+    monkeypatch.setattr("sync_remote.transport.update_ssh_port_in_config", lambda port, config: updated_ports.append(port))
+
+    assert get_port_from_cpolar(config) == "2300"
+    assert updated_ports == []

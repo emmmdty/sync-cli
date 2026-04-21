@@ -20,7 +20,6 @@ from .config import (
     load_project_config,
     prompt_for_config,
     set_default_host as set_config_default_host,
-    update_server_port,
     write_project_config,
 )
 from .operations import (
@@ -38,7 +37,6 @@ from .transport import (
     resolve_connection_port,
     should_exclude_by_pattern,
     sync_upload,
-    update_ssh_port_in_config,
 )
 
 
@@ -600,21 +598,9 @@ def _resolve_runtime_password(config) -> str | None:
     return getpass.getpass("服务器密码: ")
 
 
-def _persist_resolved_auto_port(config, config_path: Path, port: str):
-    update_ssh_port_in_config(port, config)
-    resolved_port = int(port)
-    if config.connection.port == resolved_port:
-        return config
-    updated_config = update_server_port(config, config.connection.host, resolved_port)
-    write_project_config(updated_config, config_path)
-    return updated_config
-
-
-def _resolve_port_for_command(config, *, config_path: Path, explicit_port: str | None):
+def _resolve_port_for_command(config, *, explicit_port: str | None):
     port = resolve_connection_port(config, explicit_port=explicit_port)
-    if explicit_port or config.connection.port_mode != "auto":
-        return port, config
-    return port, _persist_resolved_auto_port(config, config_path, port)
+    return port, config
 
 
 def _normalize_requested_hosts(config, raw_hosts: tuple[str, ...]) -> tuple[str, ...] | None:
@@ -644,31 +630,21 @@ def _perform_upload(args: argparse.Namespace, *, config, remote_dir: str, port: 
     )
 
 
-def _run_upload_to_hosts(args: argparse.Namespace, *, config, config_path: Path, hosts: tuple[str, ...]) -> int:
+def _run_upload_to_hosts(args: argparse.Namespace, *, config, hosts: tuple[str, ...]) -> int:
     target_hosts = _normalize_requested_hosts(config, hosts)
     if target_hosts is None:
         return 1
 
     prepared_targets: list[tuple[str, object, str, str, str | None]] = []
-    config_to_persist = config
-    config_changed = False
     failures: dict[str, str] = {}
 
     for host in target_hosts:
-        host_config = set_config_default_host(config_to_persist, host)
+        host_config = set_config_default_host(config, host)
         try:
             port = resolve_connection_port(host_config, explicit_port=args.port)
         except RuntimeError as exc:
             failures[host] = str(exc)
             continue
-
-        if not args.port and host_config.connection.port_mode == "auto":
-            update_ssh_port_in_config(port, host_config)
-            resolved_port = int(port)
-            if host_config.connection.port != resolved_port:
-                config_to_persist = update_server_port(config_to_persist, host, resolved_port)
-                host_config = set_config_default_host(config_to_persist, host)
-                config_changed = True
 
         password = _resolve_runtime_password(host_config)
         if host_config.connection.auth_mode == "password" and password is None:
@@ -676,9 +652,6 @@ def _run_upload_to_hosts(args: argparse.Namespace, *, config, config_path: Path,
             continue
 
         prepared_targets.append((host, host_config, _resolve_remote_dir(host_config), port, password))
-
-    if config_changed:
-        write_project_config(config_to_persist, config_path)
 
     results: dict[str, bool] = {}
     if prepared_targets:
@@ -815,14 +788,13 @@ def _handle_upload(args: argparse.Namespace) -> int:
         return _run_upload_to_hosts(
             args,
             config=config,
-            config_path=config_path,
             hosts=tuple(args.hosts),
         )
 
     remote_dir = _resolve_remote_dir(config)
 
     try:
-        port, config = _resolve_port_for_command(config, config_path=config_path, explicit_port=args.port)
+        port, config = _resolve_port_for_command(config, explicit_port=args.port)
     except RuntimeError as exc:
         print(exc)
         return 1
@@ -844,7 +816,7 @@ def _handle_download(args: argparse.Namespace) -> int:
     remote_dir = _resolve_remote_dir(config)
 
     try:
-        port, config = _resolve_port_for_command(config, config_path=config_path, explicit_port=args.port)
+        port, config = _resolve_port_for_command(config, explicit_port=args.port)
     except RuntimeError as exc:
         print(exc)
         return 1
@@ -895,7 +867,7 @@ def _handle_open(args: argparse.Namespace) -> int:
     remote_dir = _resolve_remote_dir(config)
 
     try:
-        port, config = _resolve_port_for_command(config, config_path=config_path, explicit_port=args.port)
+        port, config = _resolve_port_for_command(config, explicit_port=args.port)
     except RuntimeError as exc:
         print(exc)
         return 1
@@ -925,7 +897,7 @@ def _handle_watch(args: argparse.Namespace) -> int:
     remote_dir = _resolve_remote_dir(config)
 
     try:
-        port, config = _resolve_port_for_command(config, config_path=config_path, explicit_port=args.port)
+        port, config = _resolve_port_for_command(config, explicit_port=args.port)
     except RuntimeError as exc:
         print(exc)
         return 1
@@ -986,11 +958,10 @@ def _handle_upload_all(args: argparse.Namespace) -> int:
     if loaded is None:
         return 1
 
-    config, config_path = loaded
+    config, _config_path = loaded
     return _run_upload_to_hosts(
         args,
         config=config,
-        config_path=config_path,
         hosts=list_server_names(config),
     )
 
@@ -1036,7 +1007,7 @@ def _handle_status() -> int:
     print(f"sshpass: {_sshpass_status(config)}")
     print(f"远端目录: {remote_dir}")
     try:
-        port, _updated_config = _resolve_port_for_command(config, config_path=config_path, explicit_port=None)
+        port, _updated_config = _resolve_port_for_command(config, explicit_port=None)
         print(f"端口: {port}")
     except RuntimeError as exc:
         print(f"端口: 未解析 ({exc})")
@@ -1071,7 +1042,7 @@ def _handle_doctor() -> int:
     print(f"cpolar_env: {_cpolar_env_status(config)}")
     print(f"cpolar_credentials: {_cpolar_credentials_status(config)}")
     try:
-        port, _updated_config = _resolve_port_for_command(config, config_path=config_path, explicit_port=None)
+        port, _updated_config = _resolve_port_for_command(config, explicit_port=None)
         print(f"port: OK ({port})")
     except RuntimeError as exc:
         print(f"port: ERROR ({exc})")
