@@ -155,7 +155,6 @@ def get_port_from_cpolar(config: ProjectConfig) -> str | None:
             return None
 
         port = extracted_url.rsplit(":", maxsplit=1)[-1]
-        update_ssh_port_in_config(port, config)
         return port
 
 

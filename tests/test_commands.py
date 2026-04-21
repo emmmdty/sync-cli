@@ -613,7 +613,7 @@ def test_upload_hosts_uses_requested_hosts_and_server_specific_remote_dirs(
     ]
 
 
-def test_status_persists_resolved_auto_port_to_yaml_and_ssh_config(
+def test_status_does_not_persist_resolved_auto_port_to_yaml_or_ssh_config(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -665,8 +665,67 @@ def test_status_persists_resolved_auto_port_to_yaml_and_ssh_config(
 
     assert exit_code == 0
     saved_data = yaml.safe_load((project_dir / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
-    assert saved_data["servers"]["gpu-a"]["port"] == 2300
-    assert "Port 2300" in ssh_config_path.read_text(encoding="utf-8")
+    assert saved_data["servers"]["gpu-a"]["port"] is None
+    assert "Port 22" in ssh_config_path.read_text(encoding="utf-8")
+
+
+def test_doctor_does_not_persist_resolved_auto_port_to_yaml_or_ssh_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    ssh_dir = tmp_path / "home" / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    ssh_config_path = ssh_dir / "config"
+    ssh_config_path.write_text(
+        "Host gpu-a\n"
+        "  HostName gpu-a.internal\n"
+        "  User alice\n"
+        "  Port 22\n"
+        "  IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config_data = {
+        "version": 2,
+        "project": {"remote_base_dir": "/srv/default", "append_project_dir": True},
+        "default_host": "gpu-a",
+        "servers": {
+            "gpu-a": {
+                "user": "alice",
+                "host": "gpu-a",
+                "hostname": "gpu-a.internal",
+                "port_mode": "auto",
+                "port": None,
+                "ssh_config_path": str(ssh_config_path),
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "key",
+                "remote_base_dir": "/srv/work-a",
+                "append_project_dir": True,
+                "cpolar": {"tunnel_name": "gpu-a", "env_path": "~/.env"},
+            }
+        },
+        "sync": {"transport": "rsync", "max_file_size_mb": 50, "excludes": [".git"]},
+        "backup": {"excludes": [".git", ".venv"]},
+    }
+
+    monkeypatch.chdir(project_dir)
+    (project_dir / DEFAULT_CONFIG_FILENAME).write_text(
+        yaml.safe_dump(config_data, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("sync_remote.cli.resolve_connection_port", lambda config, explicit_port=None: "2300")
+    monkeypatch.setattr("sync_remote.cli._ssh_alias_status", lambda config: "OK")
+    monkeypatch.setattr("sync_remote.cli._cpolar_env_status", lambda config: f"OK ({config.cpolar.env_path})")
+    monkeypatch.setattr("sync_remote.cli._cpolar_credentials_status", lambda config: f"OK ({config.cpolar.env_path})")
+
+    exit_code = main(["doctor"])
+
+    assert exit_code == 0
+    saved_data = yaml.safe_load((project_dir / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert saved_data["servers"]["gpu-a"]["port"] is None
+    assert "Port 22" in ssh_config_path.read_text(encoding="utf-8")
 
 
 def test_status_reports_default_host_and_server_list(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -690,6 +749,98 @@ def test_status_reports_default_host_and_server_list(tmp_path: Path, monkeypatch
     assert "服务器列表:" in captured.out
     assert "gpu-a" in captured.out
     assert "gpu-b" in captured.out
+
+
+def test_upload_hosts_does_not_persist_auto_port_resolution(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    ssh_dir = tmp_path / "home" / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    ssh_config_path = ssh_dir / "config"
+    ssh_config_path.write_text(
+        "Host gpu-a\n"
+        "  HostName gpu-a.internal\n"
+        "  User alice\n"
+        "  Port 22\n"
+        "  IdentityFile ~/.ssh/id_ed25519\n"
+        "Host gpu-b\n"
+        "  HostName gpu-b.internal\n"
+        "  User bob\n"
+        "  Port 22\n"
+        "  IdentityFile ~/.ssh/id_ed25519\n",
+        encoding="utf-8",
+    )
+    config_data = {
+        "version": 2,
+        "project": {"remote_base_dir": "/srv/default", "append_project_dir": True},
+        "default_host": "gpu-a",
+        "servers": {
+            "gpu-a": {
+                "user": "alice",
+                "host": "gpu-a",
+                "hostname": "gpu-a.internal",
+                "port_mode": "fixed",
+                "port": 2222,
+                "ssh_config_path": str(ssh_config_path),
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "key",
+                "remote_base_dir": "/srv/work-a",
+                "append_project_dir": True,
+                "cpolar": {"tunnel_name": "", "env_path": "~/.env"},
+            },
+            "gpu-b": {
+                "user": "bob",
+                "host": "gpu-b",
+                "hostname": "gpu-b.internal",
+                "port_mode": "auto",
+                "port": None,
+                "ssh_config_path": str(ssh_config_path),
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "key",
+                "remote_base_dir": "/srv/work-b",
+                "append_project_dir": False,
+                "cpolar": {"tunnel_name": "gpu-b", "env_path": "~/.env"},
+            },
+        },
+        "sync": {"transport": "rsync", "max_file_size_mb": 50, "excludes": [".git"]},
+        "backup": {"excludes": [".git", ".venv"]},
+    }
+    attempts: list[tuple[str, str, str]] = []
+
+    monkeypatch.chdir(project_dir)
+    (project_dir / DEFAULT_CONFIG_FILENAME).write_text(
+        yaml.safe_dump(config_data, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sync_remote.cli.resolve_connection_port",
+        lambda config, explicit_port=None: "2222" if config.connection.host == "gpu-a" else "2200",
+    )
+
+    def fake_upload(*, remote_dir, port, config, **_kwargs):
+        attempts.append((config.connection.host, remote_dir, port))
+        return True
+
+    monkeypatch.setattr("sync_remote.cli.sync_upload", fake_upload)
+
+    exit_code = main(["upload", "--hosts", "gpu-b", "gpu-a"])
+
+    assert exit_code == 0
+    assert sorted(attempts) == [
+        ("gpu-a", "/srv/work-a/demo", "2222"),
+        ("gpu-b", "/srv/work-b", "2200"),
+    ]
+    saved_data = yaml.safe_load((project_dir / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
+    assert saved_data["servers"]["gpu-b"]["port"] is None
+    ssh_config_contents = ssh_config_path.read_text(encoding="utf-8")
+    assert "Host gpu-b" in ssh_config_contents
+    assert "Port 22" in ssh_config_contents
+    assert "Port 2200" not in ssh_config_contents
 
 
 def test_version_prints_display_version(monkeypatch, capsys) -> None:

@@ -17,14 +17,14 @@
   - fresh-worktree `uv sync` is blocked in this sandbox because the lockfile registry points to a network mirror; phase verification uses the existing repo `.venv` plus worktree `PYTHONPATH`.
 
 ## Active phase
-- Phase: Phase 0
-- Branch: `codex/phase-00-baseline`
-- Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/phase-00-baseline`
-- Goal: capture the baseline, track Codex phase docs in-repo, and leave integration `main` ready for Phase 1.
+- Phase: Phase 1
+- Branch: `codex/phase-01-stabilize`
+- Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/codex-main-integration/.worktrees/phase-01`
+- Goal: remove implicit config and SSH writes from diagnostics and runtime port resolution, with regression coverage for read-only behavior.
 - Planned acceptance:
-  - baseline tests executed and recorded
-  - `docs/codex/PROGRESS.md` exists and is meaningful
-  - no product behavior changes introduced in Phase 0
+  - diagnostics remain read-only by default
+  - runtime port resolution no longer mutates YAML or SSH config
+  - full test suite passes after regression coverage is added
 
 ## Completed phases
 
@@ -35,8 +35,10 @@
 - Cleanup result: removed `codex/phase-00-baseline` worktree and deleted the phase branch
 
 ### Phase 1
-- Summary:
+- Summary: made `status`, `doctor`, and multi-host upload port resolution read-only by default; removed implicit SSH-config writes from `get_port_from_cpolar()` and removed CLI-side write-through persistence for resolved auto ports.
 - Tests:
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_commands.py::test_status_does_not_persist_resolved_auto_port_to_yaml_or_ssh_config tests/test_commands.py::test_doctor_does_not_persist_resolved_auto_port_to_yaml_or_ssh_config tests/test_commands.py::test_upload_hosts_does_not_persist_auto_port_resolution tests/test_transport.py::test_get_port_from_cpolar_does_not_update_ssh_config -q` -> `4 passed in 0.41s`
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q` -> `69 passed in 2.43s`
 - Merge result:
 - Cleanup result:
 
@@ -59,7 +61,6 @@
 - Cleanup result:
 
 ## Open risks / deferred items
-- `status` and dynamic-port resolution currently mutate config/SSH state and must be made read-only by default in Phase 1.
 - `port-sync` needs to be introduced without widening the product scope.
 - Final cleanup must distinguish Codex-created worktrees/branches from pre-existing user worktrees/branches that were explicitly preserved.
 
