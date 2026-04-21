@@ -39,8 +39,8 @@
 - Tests:
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_commands.py::test_status_does_not_persist_resolved_auto_port_to_yaml_or_ssh_config tests/test_commands.py::test_doctor_does_not_persist_resolved_auto_port_to_yaml_or_ssh_config tests/test_commands.py::test_upload_hosts_does_not_persist_auto_port_resolution tests/test_transport.py::test_get_port_from_cpolar_does_not_update_ssh_config -q` -> `4 passed in 0.41s`
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q` -> `69 passed in 2.43s`
-- Merge result:
-- Cleanup result:
+- Merge result: merged `codex/phase-01-stabilize` into integration `main`
+- Cleanup result: removed the `codex/phase-01-stabilize` worktree and deleted the phase branch
 
 ### Phase 2
 - Summary:
