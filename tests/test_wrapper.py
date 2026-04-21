@@ -20,3 +20,6 @@ def test_normalize_args_recognizes_new_command_names() -> None:
     assert _normalize_args(["upload-all-gpu"]) == ["upload-all-gpu"]
     assert _normalize_args(["version"]) == ["version"]
     assert _normalize_args(["update", "--channel", "main"]) == ["update", "--channel", "main"]
+    assert _normalize_args(["target", "list"]) == ["target", "list"]
+    assert _normalize_args(["config", "validate"]) == ["config", "validate"]
+    assert _normalize_args(["port-sync", "--json"]) == ["port-sync", "--json"]

@@ -16,13 +16,18 @@
 
 - `init` 会生成或更新当前目录的 `sync-remote.yaml`
 - 已有配置时再次执行 `init` 会追加服务器，并把新服务器设为默认值
-- 支持 `switch`、`del`、`status` 管理多服务器配置
+- 规范命令树使用 `target`、`config` 和显式 `port-sync`
+- 支持 `target list`、`target use`、`target remove` 管理多目标配置
+- 支持 `config validate`、`config explain`、`config migrate` 检查和规范化配置
+- `doctor`、`status` 默认只读，不会静默改写项目配置或 SSH config
 - `upload`、`download`、`open`、`watch`、`doctor` 默认都作用于当前默认服务器
 - `upload --hosts` 可一次上传到一个或多个指定服务器
-- `upload-all-gpu` 会并发上传到配置中的所有服务器，失败不会中断后续任务
+- `upload --all-targets` 会并发上传到配置中的所有服务器，失败不会中断后续任务
+- `port-sync` 默认只预览动态端口解析结果，显式 `--apply` 后才会写回项目配置
 - 支持 `key` 和 `password` 两种认证模式
 - 支持 `auto` 和 `fixed` 两种 SSH 端口模式
 - 支持 `version` 查看当前版本，`update` 从 GitHub 自更新
+- 兼容命令仍保留，但推荐优先使用 `target`、`config` 和显式 `port-sync`
 - 兼容旧入口 `sync_to_remote.py`
 
 ## 安装
@@ -96,23 +101,38 @@ sr up
 4. 切换默认服务器后再次上传：
 
 ```bash
-sr switch gpu-b
+sr target list
+sr target use gpu-b
 sr up
 ```
 
 5. 上传到所有已配置服务器：
 
 ```bash
-sr upload-all-gpu
+sr up --all-targets
 ```
 
-6. 只上传到指定服务器：
+6. 校验并解释当前配置：
+
+```bash
+sr config validate
+sr config explain
+```
+
+7. 预览动态端口同步结果；确认后再显式应用：
+
+```bash
+sr port-sync --json
+sr port-sync --apply --write-ssh-config
+```
+
+8. 只上传到指定服务器：
 
 ```bash
 sr up --hosts gpu-a gpu-b
 ```
 
-7. 查看版本并按 Release 通道更新：
+9. 查看版本并按 Release 通道更新：
 
 ```bash
 sr version
@@ -121,7 +141,9 @@ sr update --channel release
 
 ## 命令一览
 
-| 功能 | 长命令 | 简写 |
+### 规范命令
+
+| 功能 | 长命令 | 常用写法 |
 | --- | --- | --- |
 | 初始化或追加服务器 | `sync-remote init` | `sr init` |
 | 上传 | `sync-remote upload` | `sr up` |
@@ -129,20 +151,34 @@ sr update --channel release
 | 备份 | `sync-remote backup` | `sr backup` |
 | 打开远端目录 | `sync-remote open` | `sr op` |
 | 实时同步 | `sync-remote watch` | `sr wt` |
-| 切换默认服务器 | `sync-remote switch` | `sr switch` |
-| 删除服务器 | `sync-remote del` | `sr del` |
-| 上传到所有服务器 | `sync-remote upload-all-gpu` | `sr upload-all-gpu` |
+| 查看目标列表 | `sync-remote target list` | `sr target list` |
+| 切换默认目标 | `sync-remote target use` | `sr target use gpu-b` |
+| 删除目标 | `sync-remote target remove` | `sr target remove gpu-b` |
+| 预览或应用端口同步 | `sync-remote port-sync` | `sr port-sync --json` |
+| 校验配置 | `sync-remote config validate` | `sr config validate` |
+| 解释配置 | `sync-remote config explain` | `sr config explain` |
+| 迁移配置 | `sync-remote config migrate` | `sr config migrate --apply` |
 | 查看版本 | `sync-remote version` | `sr version` |
 | 自动更新 | `sync-remote update` | `sr update` |
 | 查看配置状态 | `sync-remote status` | `sr status` |
 | 环境自检 | `sync-remote doctor` | `sr doctor` |
+
+### 兼容别名
+
+| 历史命令 | 当前建议 |
+| --- | --- |
+| `sr switch gpu-b` | `sr target use gpu-b` |
+| `sr del gpu-b` | `sr target remove gpu-b` |
+| `sr upload-all-gpu` | `sr up --all-targets` |
 
 更多参数说明可直接查看帮助：
 
 ```bash
 sync-remote --help
 sync-remote upload --help
-sync-remote switch --help
+sync-remote target --help
+sync-remote config --help
+sync-remote port-sync --help
 sync-remote update --help
 ```
 
@@ -151,22 +187,24 @@ sync-remote update --help
 运行 `sync-remote init` 后，会在当前目录生成或更新 `sync-remote.yaml`。
 
 - `init` 会优先扫描本机 `~/.ssh/config`，可直接复用已有 Host，也可在流程中新增 Host
-- 如果当前目录已经有配置，再次执行 `init` 会追加新的服务器，并把最后追加的 Host 设为 `default_host`
-- 每个 `server` 都有自己的远端目录配置，追加 Host 时不再默认和其他 Host 共用同一个远端目录
-- `upload`、`download`、`open`、`watch`、`doctor` 都读取 `default_host`
-- `switch` 只切换默认服务器，不改其他配置
-- `del` 删除指定服务器；删除默认服务器时，会把最后一个剩余服务器设为默认
+- 如果当前目录已经有配置，再次执行 `init` 会追加新的服务器，并把最后追加的 Host 设为 `default_target`
+- 每个 `target` 都有自己的远端目录配置，追加 Host 时不再默认和其他 Host 共用同一个远端目录
+- `upload`、`download`、`open`、`watch`、`doctor` 都读取 `default_target`
+- `target use` 只切换默认目标，不改其他配置
+- `target remove` 删除指定目标；删除默认目标时，会把最后一个剩余目标设为默认
 - 读取顺序是 `sync-remote.yaml` 优先，找不到时回退到旧配置 `sync_config.yaml`
-- 旧版单服务器配置仍可读取，但新的写回结构统一是 `version: 2`
+- 旧版单服务器配置仍可读取，但新的写回结构统一是 `version: 3`
 
 端口模式：
 
-- `auto`：优先从 Cpolar 获取端口，失败时回退 `~/.ssh/config`；解析成功后会同步更新 YAML 和 `~/.ssh/config` 中对应 Host 的端口
+- `auto`：优先从 Cpolar 获取端口，失败时回退 `~/.ssh/config`
 - `fixed`：直接使用配置中的固定端口，不访问 Cpolar
+- `status`、`doctor` 默认只读；如果需要把解析结果写回配置，使用 `sr port-sync --apply`
+- 如果还需要同时更新 `~/.ssh/config`，显式追加 `--write-ssh-config`
 
 远端目录默认由两部分组成：
 
-- `servers.<host>.remote_base_dir`
+- `targets.<name>.project.remote_base_dir`
 - 当前工作目录名
 
 例如当前目录名为 `demo-project`，某台服务器的远端基础目录为 `/srv/projects`，则该服务器默认远端目录为：
@@ -175,45 +213,46 @@ sync-remote update --help
 /srv/projects/demo-project
 ```
 
-### `version: 2` 多服务器示例
+### `version: 3` 规范化多目标示例
 
 ```yaml
-version: 2
-project:
-  remote_base_dir: /srv/gpu-b
-  append_project_dir: true
-default_host: gpu-b
-servers:
+version: 3
+default_target: gpu-b
+targets:
   gpu-a:
-    remote_base_dir: /srv/gpu-a
-    append_project_dir: true
-    user: alice
-    host: gpu-a
-    hostname: gpu-a.internal
-    port_mode: fixed
-    port: 2222
-    ssh_config_path: ~/.ssh/config
-    ssh_key_path: ~/.ssh/id_ed25519
-    known_hosts_check: true
-    auth_mode: key
-    cpolar:
-      tunnel_name: ""
-      env_path: ~/.env
+    project:
+      remote_base_dir: /srv/gpu-a
+      append_project_dir: true
+    ssh:
+      user: alice
+      host: gpu-a
+      hostname: gpu-a.internal
+      ssh_config_path: ~/.ssh/config
+      ssh_key_path: ~/.ssh/id_ed25519
+      known_hosts_check: true
+      auth_mode: key
+    port:
+      kind: fixed
+      value: 2222
   gpu-b:
-    remote_base_dir: /srv/gpu-b
-    append_project_dir: true
-    user: bob
-    host: gpu-b
-    hostname: example.tcp.vip.cpolar.cn
-    port_mode: auto
-    port: null
-    ssh_config_path: ~/.ssh/config
-    ssh_key_path: ~/.ssh/id_ed25519
-    known_hosts_check: true
-    auth_mode: password
-    cpolar:
-      tunnel_name: prod-tunnel
-      env_path: ~/.env.prod
+    project:
+      remote_base_dir: /srv/gpu-b
+      append_project_dir: true
+    ssh:
+      user: bob
+      host: gpu-b
+      hostname: example.tcp.vip.cpolar.cn
+      ssh_config_path: ~/.ssh/config
+      ssh_key_path: ~/.ssh/id_ed25519
+      known_hosts_check: true
+      auth_mode: password
+    port:
+      kind: provider
+      resolved: null
+      provider:
+        type: cpolar
+        tunnel_name: prod-tunnel
+        env_path: ~/.env.prod
 sync:
   transport: rsync
   max_file_size_mb: 50
@@ -229,11 +268,14 @@ backup:
 上面这份配置里：
 
 - `sr up`、`sr status`、`sr doctor` 默认都会走 `gpu-b`
-- `sr switch gpu-a` 会把默认服务器切到 `gpu-a`
-- `sr del gpu-b` 会删除 `gpu-b` 并把剩余服务器设为默认
+- `sr target use gpu-a` 会把默认服务器切到 `gpu-a`
+- `sr target remove gpu-b` 会删除 `gpu-b` 并把剩余服务器设为默认
 - `sr up --hosts gpu-a gpu-b` 会并发上传到 `gpu-a` 和 `gpu-b`
-- `sr upload-all-gpu` 会并发上传到所有已配置服务器
-- 顶层 `project.*` 是当前 `default_host` 的镜像值，真正按 host 生效的目录配置在 `servers.<host>.*`
+- `sr up --all-targets` 会并发上传到所有已配置服务器
+- `sr config validate` 会检查配置能否被正确读取
+- `sr config migrate --apply` 会把旧结构规范化写回为 `version: 3`
+- `sr port-sync --json` 只预览端口解析结果，不会写配置
+- `sr port-sync --apply --write-ssh-config` 才会同时更新项目配置和 SSH config
 
 如果你同时维护 `~/.ssh/config`，可写成：
 
@@ -268,15 +310,14 @@ sr up --dry-run
 ### 切换默认服务器
 
 ```bash
-sr switch
-sr switch gpu-a
+sr target list
+sr target use gpu-a
 ```
 
 ### 删除某台服务器
 
 ```bash
-sr del
-sr del gpu-b
+sr target remove gpu-b
 ```
 
 ### 下载远端快照
@@ -301,13 +342,28 @@ sync-remote open --watch
 ### 批量上传到所有服务器
 
 ```bash
-sr upload-all-gpu
+sr up --all-targets
 ```
 
 ### 批量上传到指定服务器
 
 ```bash
 sr up --hosts gpu-a gpu-b
+```
+
+### 检查和迁移配置
+
+```bash
+sr config validate
+sr config explain
+sr config migrate --apply
+```
+
+### 预览或应用端口同步
+
+```bash
+sr port-sync --json
+sr port-sync --apply --write-ssh-config
 ```
 
 ### 查看版本并自更新
