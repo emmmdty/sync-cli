@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from sync_remote.config import DEFAULT_CONFIG_FILENAME, LEGACY_CONFIG_FILENAME, load_project_config
+from sync_remote.config import DEFAULT_CONFIG_FILENAME, LEGACY_CONFIG_FILENAME, load_project_config, write_project_config
 from sync_remote.operations import (
     build_remote_dir,
     default_backup_archive_path,
@@ -112,6 +112,131 @@ def test_load_project_config_supports_v2_servers_and_default_host(tmp_path: Path
     assert config.connection.hostname == "gpu-b.internal"
     assert config.connection.auth_mode == "password"
     assert config.cpolar.tunnel_name == "prod-tunnel"
+
+
+def test_load_project_config_supports_v3_targets_and_default_target(tmp_path: Path) -> None:
+    new_config = {
+        "version": 3,
+        "default_target": "gpu-b",
+        "targets": {
+            "gpu-a": {
+                "project": {"remote_base_dir": "/srv/work-a", "append_project_dir": True},
+                "ssh": {
+                    "user": "alice",
+                    "host": "gpu-a",
+                    "hostname": "gpu-a.internal",
+                    "ssh_config_path": "~/.ssh/config",
+                    "ssh_key_path": "~/.ssh/id_ed25519",
+                    "known_hosts_check": True,
+                    "auth_mode": "key",
+                },
+                "port": {"kind": "fixed", "value": 2222},
+            },
+            "gpu-b": {
+                "project": {"remote_base_dir": "/srv/work-b", "append_project_dir": False},
+                "ssh": {
+                    "user": "bob",
+                    "host": "gpu-b",
+                    "hostname": "gpu-b.internal",
+                    "ssh_config_path": "~/.ssh/config",
+                    "ssh_key_path": "~/.ssh/id_ed25519",
+                    "known_hosts_check": True,
+                    "auth_mode": "password",
+                },
+                "port": {
+                    "kind": "provider",
+                    "resolved": None,
+                    "provider": {"type": "cpolar", "tunnel_name": "prod-tunnel", "env_path": "~/.env.prod"},
+                },
+            },
+        },
+        "sync": {"transport": "rsync", "max_file_size_mb": 50, "excludes": ["node_modules"]},
+        "backup": {"excludes": [".git", ".venv"]},
+    }
+
+    (tmp_path / DEFAULT_CONFIG_FILENAME).write_text(
+        yaml.safe_dump(new_config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    config, source_path = load_project_config(tmp_path)
+
+    assert source_path == tmp_path / DEFAULT_CONFIG_FILENAME
+    assert config.version == 3
+    assert config.default_host == "gpu-b"
+    assert set(config.servers) == {"gpu-a", "gpu-b"}
+    assert config.connection.host == "gpu-b"
+    assert config.connection.port_mode == "auto"
+    assert config.connection.port is None
+    assert config.connection.auth_mode == "password"
+    assert config.project.remote_base_dir == "/srv/work-b"
+    assert config.project.append_project_dir is False
+    assert config.cpolar.tunnel_name == "prod-tunnel"
+
+
+def test_write_project_config_normalizes_to_v3_targets_schema(tmp_path: Path) -> None:
+    new_config = {
+        "version": 2,
+        "project": {"remote_base_dir": "/srv/legacy", "append_project_dir": True},
+        "default_host": "gpu-b",
+        "servers": {
+            "gpu-a": {
+                "user": "alice",
+                "host": "gpu-a",
+                "hostname": "gpu-a.internal",
+                "port_mode": "fixed",
+                "port": 2222,
+                "ssh_config_path": "~/.ssh/config",
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "key",
+                "remote_base_dir": "/srv/work-a",
+                "append_project_dir": True,
+                "cpolar": {"tunnel_name": "", "env_path": "~/.env"},
+            },
+            "gpu-b": {
+                "user": "bob",
+                "host": "gpu-b",
+                "hostname": "gpu-b.internal",
+                "port_mode": "auto",
+                "port": 2200,
+                "ssh_config_path": "~/.ssh/config",
+                "ssh_key_path": "~/.ssh/id_ed25519",
+                "known_hosts_check": True,
+                "auth_mode": "password",
+                "remote_base_dir": "/srv/work-b",
+                "append_project_dir": False,
+                "cpolar": {"tunnel_name": "prod-tunnel", "env_path": "~/.env.prod"},
+            },
+        },
+        "sync": {"transport": "rsync", "max_file_size_mb": 50, "excludes": ["node_modules"]},
+        "backup": {"excludes": [".git", ".venv"]},
+    }
+
+    (tmp_path / DEFAULT_CONFIG_FILENAME).write_text(
+        yaml.safe_dump(new_config, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    config, _source_path = load_project_config(tmp_path)
+
+    output_path = tmp_path / "normalized.yaml"
+    write_project_config(config, output_path)
+    written = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+
+    assert written["version"] == 3
+    assert written["default_target"] == "gpu-b"
+    assert set(written["targets"]) == {"gpu-a", "gpu-b"}
+    assert written["targets"]["gpu-a"]["project"]["remote_base_dir"] == "/srv/work-a"
+    assert written["targets"]["gpu-a"]["ssh"]["host"] == "gpu-a"
+    assert written["targets"]["gpu-a"]["port"] == {"kind": "fixed", "value": 2222}
+    assert written["targets"]["gpu-b"]["project"]["append_project_dir"] is False
+    assert written["targets"]["gpu-b"]["port"]["kind"] == "provider"
+    assert written["targets"]["gpu-b"]["port"]["resolved"] == 2200
+    assert written["targets"]["gpu-b"]["port"]["provider"] == {
+        "type": "cpolar",
+        "tunnel_name": "prod-tunnel",
+        "env_path": "~/.env.prod",
+    }
 
 
 def test_load_project_config_uses_server_specific_remote_dirs(tmp_path: Path) -> None:

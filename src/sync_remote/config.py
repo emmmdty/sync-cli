@@ -13,6 +13,7 @@ from .ssh_config import SSHHostEntry, list_explicit_ssh_hosts, read_ssh_host_ent
 
 DEFAULT_CONFIG_FILENAME = "sync-remote.yaml"
 LEGACY_CONFIG_FILENAME = "sync_config.yaml"
+CURRENT_CONFIG_VERSION = 3
 
 DEFAULT_SYNC_EXCLUDES = (
     ".git",
@@ -308,6 +309,44 @@ def _server_to_dict(server: ServerSettings) -> dict:
     }
 
 
+def _server_to_v3_target(server: ServerSettings) -> dict:
+    project = server.project or default_project_config().project
+    port_kind = "fixed" if server.connection.port_mode == "fixed" else "provider"
+    port_data: dict[str, object]
+    if port_kind == "fixed":
+        port_data = {
+            "kind": "fixed",
+            "value": server.connection.port,
+        }
+    else:
+        port_data = {
+            "kind": "provider",
+            "resolved": server.connection.port,
+            "provider": {
+                "type": "cpolar",
+                "tunnel_name": server.cpolar.tunnel_name,
+                "env_path": server.cpolar.env_path,
+            },
+        }
+
+    return {
+        "project": {
+            "remote_base_dir": project.remote_base_dir,
+            "append_project_dir": project.append_project_dir,
+        },
+        "ssh": {
+            "user": server.connection.user,
+            "host": server.connection.host,
+            "hostname": server.connection.hostname,
+            "ssh_config_path": server.connection.ssh_config_path,
+            "ssh_key_path": server.connection.ssh_key_path,
+            "known_hosts_check": server.connection.known_hosts_check,
+            "auth_mode": server.connection.auth_mode,
+        },
+        "port": port_data,
+    }
+
+
 def _default_server_settings() -> ServerSettings:
     defaults = default_project_config()
     return ServerSettings(connection=defaults.connection, cpolar=defaults.cpolar, project=defaults.project)
@@ -336,15 +375,15 @@ def _project_config_from_servers(
 
 
 def _config_to_dict(config: ProjectConfig) -> dict:
+    return config_to_v3_dict(config)
+
+
+def config_to_v3_dict(config: ProjectConfig) -> dict:
     return {
-        "version": max(int(config.version), 2),
-        "project": {
-            "remote_base_dir": config.project.remote_base_dir,
-            "append_project_dir": config.project.append_project_dir,
-        },
-        "default_host": config.default_host,
-        "servers": {
-            host: _server_to_dict(server)
+        "version": CURRENT_CONFIG_VERSION,
+        "default_target": config.default_host,
+        "targets": {
+            host: _server_to_v3_target(server)
             for host, server in config.servers.items()
         },
         "sync": {
@@ -361,6 +400,81 @@ def _config_to_dict(config: ProjectConfig) -> dict:
 def _build_project_config(data: dict) -> ProjectConfig:
     data = data or {}
     version = int(data.get("version", 1))
+
+    if data.get("targets"):
+        defaults = {
+            "version": CURRENT_CONFIG_VERSION,
+            "default_target": default_project_config().default_host,
+            "sync": {
+                "transport": default_project_config().sync.transport,
+                "max_file_size_mb": default_project_config().sync.max_file_size_mb,
+                "excludes": list(default_project_config().sync.excludes),
+            },
+            "backup": {
+                "excludes": list(default_project_config().backup.excludes),
+            },
+        }
+        merged = _deep_merge(defaults, data)
+        default_server = _default_server_settings()
+        servers: dict[str, ServerSettings] = {}
+
+        for target_name, raw_target in (merged.get("targets") or {}).items():
+            target_data = raw_target or {}
+            project_data = target_data.get("project") or {}
+            ssh_data = target_data.get("ssh") or {}
+            port_data = target_data.get("port") or {}
+            provider_data = port_data.get("provider") or {}
+            port_kind = port_data.get("kind", "provider")
+
+            if port_kind == "fixed":
+                port_mode = "fixed"
+                port_value = port_data.get("value", 22)
+                resolved_port = int(port_value) if port_value not in (None, "") else None
+                cpolar = CpolarSettings(tunnel_name="", env_path="~/.env")
+            else:
+                port_mode = "auto"
+                resolved = port_data.get("resolved")
+                resolved_port = int(resolved) if resolved not in (None, "") else None
+                cpolar = CpolarSettings(
+                    tunnel_name=provider_data.get("tunnel_name", ""),
+                    env_path=provider_data.get("env_path", "~/.env"),
+                )
+
+            connection = ConnectionSettings(
+                user=ssh_data.get("user", default_server.connection.user),
+                host=ssh_data.get("host") or target_name,
+                hostname=ssh_data.get("hostname", ""),
+                port_mode=port_mode,
+                port=resolved_port,
+                ssh_config_path=ssh_data.get("ssh_config_path", default_server.connection.ssh_config_path),
+                ssh_key_path=ssh_data.get("ssh_key_path", default_server.connection.ssh_key_path),
+                known_hosts_check=bool(ssh_data.get("known_hosts_check", True)),
+                auth_mode=ssh_data.get("auth_mode", "key"),
+            )
+            servers[target_name] = ServerSettings(
+                connection=connection,
+                cpolar=cpolar,
+                project=ProjectSettings(
+                    remote_base_dir=project_data.get("remote_base_dir", default_server.project.remote_base_dir),
+                    append_project_dir=bool(project_data.get("append_project_dir", True)),
+                ),
+            )
+
+        default_host = merged.get("default_target") or next(iter(servers))
+        return _project_config_from_servers(
+            version=version,
+            project=servers[default_host].project or default_server.project,
+            sync=SyncSettings(
+                transport=merged["sync"].get("transport", "rsync"),
+                max_file_size_mb=int(merged["sync"].get("max_file_size_mb", 50)),
+                excludes=tuple(merged["sync"].get("excludes", DEFAULT_SYNC_EXCLUDES)),
+            ),
+            backup=BackupSettings(
+                excludes=tuple(merged["backup"].get("excludes", DEFAULT_BACKUP_EXCLUDES)),
+            ),
+            default_host=default_host,
+            servers=servers,
+        )
 
     if data.get("servers"):
         defaults = {
@@ -577,10 +691,30 @@ def load_project_config(cwd: Path | str | None = None) -> tuple[ProjectConfig, P
 def write_project_config(config: ProjectConfig, path: Path | str) -> Path:
     destination = Path(path)
     destination.write_text(
-        yaml.safe_dump(_config_to_dict(config), allow_unicode=True, sort_keys=False),
+        yaml.safe_dump(config_to_v3_dict(config), allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
     return destination
+
+
+def describe_project_config(config: ProjectConfig, source_path: Path) -> dict:
+    return {
+        "source_path": str(source_path),
+        "version": config.version,
+        "default_target": config.default_host,
+        "targets": list(list_server_names(config)),
+        "schema_version": CURRENT_CONFIG_VERSION,
+    }
+
+
+def validate_project_config(config: ProjectConfig, source_path: Path) -> dict:
+    return {
+        "ok": True,
+        "source_path": str(source_path),
+        "version": config.version,
+        "default_target": config.default_host,
+        "targets": list(list_server_names(config)),
+    }
 
 
 def list_server_names(config: ProjectConfig) -> tuple[str, ...]:

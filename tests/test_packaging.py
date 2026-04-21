@@ -47,23 +47,32 @@ def test_repository_has_readme_license_and_gitignore() -> None:
     assert "uv tool install ." in readme_content
     assert "sr init" in readme_content
     assert "sr up" in readme_content
+    assert "sr target list" in readme_content
+    assert "sr target use gpu-b" in readme_content
+    assert "sr target remove gpu-b" in readme_content
+    assert "sr config validate" in readme_content
+    assert "sr config migrate --apply" in readme_content
+    assert "sr port-sync --json" in readme_content
+    assert "sr port-sync --apply --write-ssh-config" in readme_content
     assert "sr switch gpu-b" in readme_content
     assert "sr upload-all-gpu" in readme_content
     assert "sr version" in readme_content
     assert "sr update --channel release" in readme_content
     assert "sr watch" in readme_content
     assert "sync-remote open --watch" in readme_content
-    assert "旧版单服务器配置仍可读取，但新的写回结构统一是 `version: 2`" in readme_content
-    assert "### `version: 2` 多服务器示例" in readme_content
-    assert "default_host: gpu-b" in readme_content
-    assert "servers:" in readme_content
-    assert "port_mode: auto" in readme_content
+    assert "旧版单服务器配置仍可读取，但新的写回结构统一是 `version: 3`" in readme_content
+    assert "### `version: 3` 规范化多目标示例" in readme_content
+    assert "default_target: gpu-b" in readme_content
+    assert "targets:" in readme_content
+    assert "kind: provider" in readme_content
+    assert "resolved: null" in readme_content
     assert "hostname: example.tcp.vip.cpolar.cn" in readme_content
     assert "auth_mode: password" in readme_content
     assert "Host gpu-a" in readme_content
     assert "Host gpu-b" in readme_content
     assert "`update` 只支持通过 `uv tool install` 或 `uv tool install --editable` 安装的命令自动更新" in readme_content
     assert "它本身只是兼容包装层，会把旧调用方式转发到新的 `sync-remote` CLI" in readme_content
+    assert "兼容命令仍保留，但推荐优先使用 `target`、`config` 和显式 `port-sync`" in readme_content
     assert "MIT" in readme_content
 
     assert "MIT License" in license_content

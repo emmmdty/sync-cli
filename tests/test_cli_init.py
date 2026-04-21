@@ -61,16 +61,15 @@ def test_init_writes_yaml_updates_gitignore_and_uses_selected_ssh_host(tmp_path:
     assert exit_code == 0
     config_path = tmp_path / DEFAULT_CONFIG_FILENAME
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    assert data["version"] == 2
-    assert data["default_host"] == "gpu"
-    assert data["servers"]["gpu"]["port_mode"] == "fixed"
-    assert data["servers"]["gpu"]["port"] == 2222
-    assert data["servers"]["gpu"]["user"] == "alice"
-    assert data["servers"]["gpu"]["host"] == "gpu"
-    assert data["servers"]["gpu"]["hostname"] == "gpu.internal"
-    assert data["servers"]["gpu"]["ssh_key_path"] == "~/.ssh/id_ed25519"
-    assert data["servers"]["gpu"]["auth_mode"] == "key"
-    assert data["project"]["remote_base_dir"] == "/srv/work"
+    assert data["version"] == 3
+    assert data["default_target"] == "gpu"
+    assert data["targets"]["gpu"]["project"]["remote_base_dir"] == "/srv/work"
+    assert data["targets"]["gpu"]["port"] == {"kind": "fixed", "value": 2222}
+    assert data["targets"]["gpu"]["ssh"]["user"] == "alice"
+    assert data["targets"]["gpu"]["ssh"]["host"] == "gpu"
+    assert data["targets"]["gpu"]["ssh"]["hostname"] == "gpu.internal"
+    assert data["targets"]["gpu"]["ssh"]["ssh_key_path"] == "~/.ssh/id_ed25519"
+    assert data["targets"]["gpu"]["ssh"]["auth_mode"] == "key"
 
     gitignore_lines = gitignore_path.read_text(encoding="utf-8").splitlines()
     assert gitignore_lines.count(DEFAULT_CONFIG_FILENAME) == 1
@@ -104,17 +103,21 @@ def test_init_auto_uses_auto_preset_defaults_and_creates_ssh_config(tmp_path: Pa
 
     assert exit_code == 0
     data = yaml.safe_load((tmp_path / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
-    assert data["version"] == 2
-    assert data["default_host"] == "cpolar-server"
-    assert data["servers"]["cpolar-server"]["port_mode"] == "auto"
-    assert data["servers"]["cpolar-server"]["port"] is None
-    assert data["servers"]["cpolar-server"]["user"] == "user"
-    assert data["servers"]["cpolar-server"]["host"] == "cpolar-server"
-    assert data["servers"]["cpolar-server"]["hostname"] == "example.tcp.vip.cpolar.cn"
-    assert data["project"]["remote_base_dir"] == "/srv/projects"
-    assert data["servers"]["cpolar-server"]["ssh_key_path"] == "~/.ssh/id_ed25519"
-    assert data["servers"]["cpolar-server"]["auth_mode"] == "key"
-    assert data["servers"]["cpolar-server"]["cpolar"]["tunnel_name"] == "my-tunnel"
+    assert data["version"] == 3
+    assert data["default_target"] == "cpolar-server"
+    assert data["targets"]["cpolar-server"]["project"]["remote_base_dir"] == "/srv/projects"
+    assert data["targets"]["cpolar-server"]["port"]["kind"] == "provider"
+    assert data["targets"]["cpolar-server"]["port"]["resolved"] is None
+    assert data["targets"]["cpolar-server"]["port"]["provider"] == {
+        "type": "cpolar",
+        "tunnel_name": "my-tunnel",
+        "env_path": "~/.env",
+    }
+    assert data["targets"]["cpolar-server"]["ssh"]["user"] == "user"
+    assert data["targets"]["cpolar-server"]["ssh"]["host"] == "cpolar-server"
+    assert data["targets"]["cpolar-server"]["ssh"]["hostname"] == "example.tcp.vip.cpolar.cn"
+    assert data["targets"]["cpolar-server"]["ssh"]["ssh_key_path"] == "~/.ssh/id_ed25519"
+    assert data["targets"]["cpolar-server"]["ssh"]["auth_mode"] == "key"
 
     ssh_config = (home / ".ssh" / "config").read_text(encoding="utf-8")
     assert "Host cpolar-server" in ssh_config
@@ -137,16 +140,15 @@ def test_init_fixed_uses_fixed_preset_defaults(tmp_path: Path, monkeypatch) -> N
 
     assert exit_code == 0
     data = yaml.safe_load((tmp_path / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
-    assert data["version"] == 2
-    assert data["default_host"] == "remote-server"
-    assert data["servers"]["remote-server"]["port_mode"] == "fixed"
-    assert data["servers"]["remote-server"]["port"] == 22
-    assert data["servers"]["remote-server"]["user"] == "user"
-    assert data["servers"]["remote-server"]["host"] == "remote-server"
-    assert data["servers"]["remote-server"]["hostname"] == "example.com"
-    assert data["project"]["remote_base_dir"] == "/srv/projects"
-    assert data["servers"]["remote-server"]["ssh_key_path"] == "~/.ssh/id_ed25519"
-    assert data["servers"]["remote-server"]["auth_mode"] == "key"
+    assert data["version"] == 3
+    assert data["default_target"] == "remote-server"
+    assert data["targets"]["remote-server"]["project"]["remote_base_dir"] == "/srv/projects"
+    assert data["targets"]["remote-server"]["port"] == {"kind": "fixed", "value": 22}
+    assert data["targets"]["remote-server"]["ssh"]["user"] == "user"
+    assert data["targets"]["remote-server"]["ssh"]["host"] == "remote-server"
+    assert data["targets"]["remote-server"]["ssh"]["hostname"] == "example.com"
+    assert data["targets"]["remote-server"]["ssh"]["ssh_key_path"] == "~/.ssh/id_ed25519"
+    assert data["targets"]["remote-server"]["ssh"]["auth_mode"] == "key"
 
 
 def test_init_creates_ssh_config_and_can_switch_to_password_mode_when_keys_are_missing(
@@ -179,9 +181,9 @@ def test_init_creates_ssh_config_and_can_switch_to_password_mode_when_keys_are_m
 
     assert exit_code == 0
     data = yaml.safe_load((tmp_path / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
-    assert data["version"] == 2
-    assert data["default_host"] == "gpu"
-    assert data["servers"]["gpu"]["auth_mode"] == "password"
+    assert data["version"] == 3
+    assert data["default_target"] == "gpu"
+    assert data["targets"]["gpu"]["ssh"]["auth_mode"] == "password"
     ssh_config = (home / ".ssh" / "config").read_text(encoding="utf-8")
     assert "Host gpu" in ssh_config
     assert "HostName gpu.internal" in ssh_config
@@ -235,9 +237,9 @@ def test_init_can_generate_missing_keypair(tmp_path: Path, monkeypatch) -> None:
     assert (home / ".ssh" / "id_ed25519").exists()
     assert (home / ".ssh" / "id_ed25519.pub").exists()
     data = yaml.safe_load((tmp_path / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
-    assert data["version"] == 2
-    assert data["default_host"] == "gpu"
-    assert data["servers"]["gpu"]["auth_mode"] == "key"
+    assert data["version"] == 3
+    assert data["default_target"] == "gpu"
+    assert data["targets"]["gpu"]["ssh"]["auth_mode"] == "key"
 
 
 def test_init_appends_server_and_sets_new_default_host(tmp_path: Path, monkeypatch) -> None:
@@ -291,13 +293,12 @@ def test_init_appends_server_and_sets_new_default_host(tmp_path: Path, monkeypat
 
     assert exit_code == 0
     data = yaml.safe_load((tmp_path / DEFAULT_CONFIG_FILENAME).read_text(encoding="utf-8"))
-    assert data["version"] == 2
-    assert data["default_host"] == "gpu-b"
-    assert set(data["servers"]) == {"gpu-a", "gpu-b"}
-    assert data["servers"]["gpu-a"]["host"] == "gpu-a"
-    assert data["servers"]["gpu-b"]["host"] == "gpu-b"
-    assert data["servers"]["gpu-b"]["hostname"] == "gpu-b.internal"
-    assert data["servers"]["gpu-b"]["port"] == 2200
-    assert data["servers"]["gpu-a"]["remote_base_dir"] == "/srv/work-a"
-    assert data["servers"]["gpu-b"]["remote_base_dir"] == "/srv/work-b"
-    assert data["project"]["remote_base_dir"] == "/srv/work-b"
+    assert data["version"] == 3
+    assert data["default_target"] == "gpu-b"
+    assert set(data["targets"]) == {"gpu-a", "gpu-b"}
+    assert data["targets"]["gpu-a"]["ssh"]["host"] == "gpu-a"
+    assert data["targets"]["gpu-b"]["ssh"]["host"] == "gpu-b"
+    assert data["targets"]["gpu-b"]["ssh"]["hostname"] == "gpu-b.internal"
+    assert data["targets"]["gpu-b"]["port"] == {"kind": "fixed", "value": 2200}
+    assert data["targets"]["gpu-a"]["project"]["remote_base_dir"] == "/srv/work-a"
+    assert data["targets"]["gpu-b"]["project"]["remote_base_dir"] == "/srv/work-b"

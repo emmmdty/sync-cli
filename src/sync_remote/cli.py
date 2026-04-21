@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import getpass
+import json
 import os
 from pathlib import Path
 import shutil
@@ -12,14 +13,19 @@ import time
 from dotenv import dotenv_values
 
 from .config import (
+    CURRENT_CONFIG_VERSION,
     DEFAULT_CONFIG_FILENAME,
+    config_to_v3_dict,
     delete_server as delete_config_server,
+    describe_project_config,
     ensure_gitignore_entry,
     expand_user_path,
     list_server_names,
     load_project_config,
     prompt_for_config,
     set_default_host as set_config_default_host,
+    update_server_port,
+    validate_project_config,
     write_project_config,
 )
 from .operations import (
@@ -37,6 +43,7 @@ from .transport import (
     resolve_connection_port,
     should_exclude_by_pattern,
     sync_upload,
+    update_ssh_port_in_config,
 )
 
 
@@ -60,6 +67,22 @@ def _add_command_help_argument(parser: argparse.ArgumentParser) -> None:
         action="help",
         help="显示当前子命令的帮助信息并退出",
     )
+
+
+def _add_json_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="以 JSON 输出结果，适合脚本或自动化调用",
+    )
+
+
+def _emit_output(*, payload: dict, text_lines: list[str], as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    for line in text_lines:
+        print(line)
 
 
 def _add_common_sync_arguments(parser: argparse.ArgumentParser, *, for_open: bool, include_watch_hint: bool = False) -> None:
@@ -137,6 +160,10 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "  sync-remote upload --dry-run\n"
             "  sr upload\n"
             "  sr up\n"
+            "  sr target list\n"
+            "  sr target use gpu-b\n"
+            "  sr config validate\n"
+            "  sr port-sync --json\n"
             "  sr switch gpu-b\n"
             "  sync-remote download\n"
             "  sr dl\n"
@@ -212,6 +239,11 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         nargs="+",
         metavar="HOST",
         help="上传到一个或多个指定服务器；不传时仍使用当前默认服务器",
+    )
+    upload.add_argument(
+        "--all-targets",
+        action="store_true",
+        help="上传到当前配置中的所有目标服务器；是 `upload-all-gpu` 的规范替代写法",
     )
 
     download = subparsers.add_parser(
@@ -400,6 +432,113 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     )
     _add_command_help_argument(upload_all)
     _add_common_sync_arguments(upload_all, for_open=False)
+
+    port_sync = subparsers.add_parser(
+        "port-sync",
+        add_help=False,
+        help="显式预览或应用目标服务器的端口同步结果",
+        description=(
+            "解析当前目标服务器的 SSH 端口，并以显式预览或应用方式同步结果。\n"
+            "可执行命令: `sync-remote port-sync` 或 `sr port-sync`\n\n"
+            "行为说明:\n"
+            "  - 默认只预览，不写配置文件，也不写 SSH config\n"
+            "  - `--apply` 时会把解析结果写回项目配置\n"
+            "  - 只有显式传入 `--write-ssh-config` 时才会写 SSH config"
+        ),
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(port_sync)
+    _add_json_argument(port_sync)
+    port_sync.add_argument("host", nargs="?", help="要同步端口的目标服务器；不传时使用当前默认服务器")
+    port_sync.add_argument("--apply", action="store_true", help="将解析结果写回项目配置")
+    port_sync.add_argument("--write-ssh-config", action="store_true", help="在 `--apply` 时同时更新 SSH config 中对应 Host 的端口")
+
+    target_command = subparsers.add_parser(
+        "target",
+        add_help=False,
+        help="目标服务器管理命令",
+        description="目标服务器管理命令树，提供列表、切换、删除和显式端口同步。",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(target_command)
+    target_subparsers = target_command.add_subparsers(dest="target_command", required=True)
+
+    target_list = target_subparsers.add_parser(
+        "list",
+        add_help=False,
+        help="列出当前配置中的所有目标服务器",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(target_list)
+    _add_json_argument(target_list)
+
+    target_use = target_subparsers.add_parser(
+        "use",
+        add_help=False,
+        help="切换当前默认目标服务器",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(target_use)
+    target_use.add_argument("host", nargs="?", help="要切换到的目标服务器")
+
+    target_remove = target_subparsers.add_parser(
+        "remove",
+        add_help=False,
+        help="删除一个目标服务器配置",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(target_remove)
+    target_remove.add_argument("host", nargs="?", help="要删除的目标服务器")
+
+    target_port_sync = target_subparsers.add_parser(
+        "port-sync",
+        add_help=False,
+        help="显式预览或应用目标服务器的端口同步结果",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(target_port_sync)
+    _add_json_argument(target_port_sync)
+    target_port_sync.add_argument("host", nargs="?", help="要同步端口的目标服务器；不传时使用当前默认服务器")
+    target_port_sync.add_argument("--apply", action="store_true", help="将解析结果写回项目配置")
+    target_port_sync.add_argument("--write-ssh-config", action="store_true", help="在 `--apply` 时同时更新 SSH config 中对应 Host 的端口")
+
+    config_command = subparsers.add_parser(
+        "config",
+        add_help=False,
+        help="配置检查、解释和迁移命令",
+        description="配置检查、解释和迁移命令树。",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(config_command)
+    config_subparsers = config_command.add_subparsers(dest="config_command", required=True)
+
+    config_validate = config_subparsers.add_parser(
+        "validate",
+        add_help=False,
+        help="检查当前项目配置是否可读取",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(config_validate)
+    _add_json_argument(config_validate)
+
+    config_explain = config_subparsers.add_parser(
+        "explain",
+        add_help=False,
+        help="解释当前配置的默认目标和目标列表",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(config_explain)
+    _add_json_argument(config_explain)
+
+    config_migrate = config_subparsers.add_parser(
+        "migrate",
+        add_help=False,
+        help="预览或应用 v3 规范化配置迁移",
+        formatter_class=HelpFormatter,
+    )
+    _add_command_help_argument(config_migrate)
+    _add_json_argument(config_migrate)
+    config_migrate.add_argument("--apply", action="store_true", help="将当前配置写回为 v3 规范化格式")
 
     version_command = subparsers.add_parser(
         "version",
@@ -784,6 +923,12 @@ def _handle_upload(args: argparse.Namespace) -> int:
         return 1
 
     config, config_path = loaded
+    if args.all_targets:
+        return _run_upload_to_hosts(
+            args,
+            config=config,
+            hosts=list_server_names(config),
+        )
     if args.hosts:
         return _run_upload_to_hosts(
             args,
@@ -953,6 +1098,111 @@ def _handle_delete(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_target_list(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, _config_path = loaded
+    payload = {
+        "default_target": config.default_host,
+        "targets": [
+            {"name": host, "default": host == config.default_host}
+            for host in list_server_names(config)
+        ],
+    }
+    text_lines = [
+        f"默认目标服务器: {config.default_host}",
+        "目标服务器列表:",
+        *[
+            f"  - {item['name']}{' (default)' if item['default'] else ''}"
+            for item in payload["targets"]
+        ],
+    ]
+    _emit_output(payload=payload, text_lines=text_lines, as_json=args.json)
+    return 0
+
+
+def _handle_target_use(args: argparse.Namespace) -> int:
+    return _handle_switch(args)
+
+
+def _handle_target_remove(args: argparse.Namespace) -> int:
+    return _handle_delete(args)
+
+
+def _handle_port_sync(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, config_path = loaded
+    target_host = _resolve_requested_host(config, getattr(args, "host", None) or config.default_host)
+    if target_host is None:
+        return 1
+
+    target_config = set_config_default_host(config, target_host)
+    try:
+        port = resolve_connection_port(target_config, explicit_port=None)
+    except RuntimeError as exc:
+        print(exc)
+        return 1
+
+    resolved_port = int(port)
+    config_would_change = target_config.connection.port != resolved_port
+    ssh_would_change = bool(args.write_ssh_config)
+    payload = {
+        "target": target_host,
+        "mode": target_config.connection.port_mode,
+        "resolved_port": resolved_port,
+        "preview": not args.apply,
+        "config_would_change": config_would_change,
+        "ssh_would_change": ssh_would_change,
+    }
+
+    if not args.apply:
+        _emit_output(
+            payload=payload,
+            text_lines=[
+                f"目标服务器: {target_host}",
+                f"端口模式: {target_config.connection.port_mode}",
+                f"解析端口: {resolved_port}",
+                f"项目配置将更新: {'yes' if config_would_change else 'no'}",
+                f"SSH config 将更新: {'yes' if ssh_would_change else 'no'}",
+            ],
+            as_json=args.json,
+        )
+        return 0
+
+    updated_config = config
+    if config_would_change:
+        updated_config = update_server_port(config, target_host, resolved_port)
+        write_project_config(updated_config, config_path)
+
+    if args.write_ssh_config:
+        update_ssh_port_in_config(port, set_config_default_host(updated_config, target_host))
+
+    payload.update(
+        {
+            "preview": False,
+            "config_updated": config_would_change,
+            "ssh_updated": bool(args.write_ssh_config),
+            "schema_version": CURRENT_CONFIG_VERSION,
+        }
+    )
+    _emit_output(
+        payload=payload,
+        text_lines=[
+            f"目标服务器: {target_host}",
+            f"已同步端口: {resolved_port}",
+            f"项目配置已更新: {'yes' if config_would_change else 'no'}",
+            f"SSH config 已更新: {'yes' if args.write_ssh_config else 'no'}",
+        ],
+        as_json=args.json,
+    )
+    return 0
+
+
 def _handle_upload_all(args: argparse.Namespace) -> int:
     loaded = _load_config_or_report()
     if loaded is None:
@@ -964,6 +1214,88 @@ def _handle_upload_all(args: argparse.Namespace) -> int:
         config=config,
         hosts=list_server_names(config),
     )
+
+
+def _handle_config_validate(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, config_path = loaded
+    payload = validate_project_config(config, config_path)
+    _emit_output(
+        payload=payload,
+        text_lines=[
+            f"配置文件: {config_path}",
+            f"配置版本: {config.version}",
+            f"默认目标服务器: {config.default_host}",
+            "配置校验结果: OK",
+        ],
+        as_json=args.json,
+    )
+    return 0
+
+
+def _handle_config_explain(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, config_path = loaded
+    payload = describe_project_config(config, config_path)
+    _emit_output(
+        payload=payload,
+        text_lines=[
+            f"配置文件: {config_path}",
+            f"当前配置版本: {config.version}",
+            f"规范化写回版本: {CURRENT_CONFIG_VERSION}",
+            f"默认目标服务器: {config.default_host}",
+            f"目标服务器: {', '.join(list_server_names(config))}",
+        ],
+        as_json=args.json,
+    )
+    return 0
+
+
+def _handle_config_migrate(args: argparse.Namespace) -> int:
+    loaded = _load_config_or_report()
+    if loaded is None:
+        return 1
+
+    config, config_path = loaded
+    normalized = config_to_v3_dict(config)
+    payload = {
+        "preview": not args.apply,
+        "source_path": str(config_path),
+        "current_version": config.version,
+        "target_version": CURRENT_CONFIG_VERSION,
+        "normalized": normalized,
+    }
+
+    if not args.apply:
+        _emit_output(
+            payload=payload,
+            text_lines=[
+                f"配置文件: {config_path}",
+                f"当前版本: {config.version}",
+                f"目标版本: {CURRENT_CONFIG_VERSION}",
+                "当前操作: preview",
+            ],
+            as_json=args.json,
+        )
+        return 0
+
+    write_project_config(config, config_path)
+    payload["preview"] = False
+    _emit_output(
+        payload=payload,
+        text_lines=[
+            f"配置文件: {config_path}",
+            f"已迁移为版本 {CURRENT_CONFIG_VERSION}",
+        ],
+        as_json=args.json,
+    )
+    return 0
 
 
 def _handle_version() -> int:
@@ -1076,6 +1408,24 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_delete(args)
     if args.command == "upload-all-gpu":
         return _handle_upload_all(args)
+    if args.command == "port-sync":
+        return _handle_port_sync(args)
+    if args.command == "target":
+        if args.target_command == "list":
+            return _handle_target_list(args)
+        if args.target_command == "use":
+            return _handle_target_use(args)
+        if args.target_command == "remove":
+            return _handle_target_remove(args)
+        if args.target_command == "port-sync":
+            return _handle_port_sync(args)
+    if args.command == "config":
+        if args.config_command == "validate":
+            return _handle_config_validate(args)
+        if args.config_command == "explain":
+            return _handle_config_explain(args)
+        if args.config_command == "migrate":
+            return _handle_config_migrate(args)
     if args.command == "version":
         return _handle_version()
     if args.command == "update":

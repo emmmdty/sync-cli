@@ -28,11 +28,17 @@ def test_top_level_help_mentions_both_command_names_and_examples(capsys) -> None
     assert "sync-remote open" in captured.out
     assert "sr op" in captured.out
     assert "watch (wt)" in captured.out
+    assert "target" in captured.out
+    assert "config" in captured.out
+    assert "port-sync" in captured.out
     assert "switch" in captured.out
     assert "del" in captured.out
     assert "upload-all-gpu" in captured.out
     assert "version" in captured.out
     assert "update" in captured.out
+    assert "sr target list" in captured.out
+    assert "sr config validate" in captured.out
+    assert "sr port-sync --json" in captured.out
 
 
 def test_init_help_explains_generated_config_and_modes(capsys) -> None:
@@ -191,6 +197,45 @@ def test_upload_all_gpu_help_describes_batch_upload_behavior(capsys) -> None:
     assert "usage: sync-remote upload-all-gpu" in captured.out
     assert "并发把当前目录上传到配置文件中的所有服务器" in captured.out
     assert "某个服务器失败时不会中断后续服务器" in captured.out
+
+
+def test_port_sync_help_describes_preview_and_apply_modes(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["port-sync", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote port-sync" in captured.out
+    assert "默认只预览，不写配置文件，也不写 SSH config" in captured.out
+    assert "`--apply` 时会把解析结果写回项目配置" in captured.out
+    assert "`--write-ssh-config`" in captured.out
+
+
+def test_target_help_describes_canonical_target_subcommands(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["target", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote target" in captured.out
+    assert "目标服务器管理命令树" in captured.out
+    assert "list" in captured.out
+    assert "use" in captured.out
+    assert "remove" in captured.out
+    assert "port-sync" in captured.out
+
+
+def test_config_help_describes_validation_and_migration_subcommands(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["config", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote config" in captured.out
+    assert "配置检查、解释和迁移命令树" in captured.out
+    assert "validate" in captured.out
+    assert "explain" in captured.out
+    assert "migrate" in captured.out
 
 
 def test_version_help_describes_current_version_output(capsys) -> None:
