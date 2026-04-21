@@ -17,14 +17,14 @@
   - fresh-worktree `uv sync` is blocked in this sandbox because the lockfile registry points to a network mirror; phase verification uses the existing repo `.venv` plus worktree `PYTHONPATH`.
 
 ## Active phase
-- Phase: Final cleanup (pending)
-- Branch: integration `main` after Phase 3 merge
+- Phase: Final cleanup (complete)
+- Branch: `main`
 - Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/codex-main-integration`
-- Goal: merge the accepted Phase 3 work, keep Phase 4 deferred unless a clearly safe hardening slice appears, then finish cleanup without touching preserved user worktrees.
+- Goal: accepted phases merged, optional Phase 4 deferred intentionally, and Codex-created phase branches/worktrees cleaned up while preserved external worktrees remain untouched by design.
 - Planned acceptance:
-  - full test suite passes
+  - full test suite passes on `main`
   - Phase 3 work is merged and reverified on `main`
-  - Phase 4 is either explicitly deferred or tightly justified
+  - Phase 4 is explicitly deferred
   - final cleanup evidence is recorded
 
 ## Completed phases
@@ -59,8 +59,8 @@
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_transport.py tests/test_help.py tests/test_commands.py -q` -> `59 passed in 3.23s`
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_packaging.py -q` -> `5 passed in 0.05s`
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q` -> `88 passed in 1.80s`
-- Merge result:
-- Cleanup result:
+- Merge result: merged `codex/phase-03-watch-docs` into integration `main`
+- Cleanup result: removed the `codex/phase-03-watch-docs` worktree and deleted the phase branch
 
 ### Phase 4 (optional)
 - Summary: deferred intentionally. Snapshot / pull / recovery hardening would need additional state-model decisions and risk widening the product beyond a safe SSH remote-development sync CLI in this run.
@@ -70,11 +70,11 @@
 
 ## Open risks / deferred items
 - Phase 4 snapshot / pull / recovery hardening is deferred to keep scope narrow and avoid accidental two-way-sync semantics.
-- Final cleanup must distinguish Codex-created worktrees/branches from pre-existing user worktrees/branches that were explicitly preserved.
+- Pre-existing user worktrees and the preserved dirty root worktree were intentionally left untouched; final cleanliness is verified in the dedicated integration `main` worktree.
 
 ## Final cleanup checklist
-- [ ] all accepted phases merged to `main`
-- [ ] temporary branches deleted
-- [ ] temporary worktrees removed
-- [ ] final tests run on `main`
-- [ ] `git status --short` is clean
+- [x] all accepted phases merged to `main`
+- [x] temporary branches deleted
+- [x] temporary phase worktrees removed
+- [x] final tests run on `main`
+- [x] `git status --short` is clean
