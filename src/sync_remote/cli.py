@@ -39,6 +39,7 @@ from .self_update import get_display_version, run_self_update
 from .ssh_config import read_ssh_host_entry
 from .transport import (
     download_remote_archive,
+    normalize_sync_paths,
     open_vscode_remote,
     resolve_connection_port,
     should_exclude_by_pattern,
@@ -141,6 +142,13 @@ def _add_common_sync_arguments(parser: argparse.ArgumentParser, *, for_open: boo
             default=1000,
             metavar="MS",
             help="监听防抖时间，单位毫秒；默认 1000",
+        )
+        parser.add_argument(
+            "--watch-backend",
+            choices=["auto", "poll"],
+            default="auto",
+            metavar="{auto,poll}",
+            help="选择监听后端；当前 `auto` 会解析为安全的 `poll` 轮询模式",
         )
 
 
@@ -363,6 +371,13 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         default=1000,
         metavar="MS",
         help="监听防抖时间，单位毫秒；默认 1000",
+    )
+    watch_command.add_argument(
+        "--watch-backend",
+        choices=["auto", "poll"],
+        default="auto",
+        metavar="{auto,poll}",
+        help="选择监听后端；当前 `auto` 会解析为安全的 `poll` 轮询模式",
     )
 
     switch_command = subparsers.add_parser(
@@ -593,6 +608,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(status)
+    _add_json_argument(status)
 
     doctor = subparsers.add_parser(
         "doctor",
@@ -611,6 +627,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(doctor)
+    _add_json_argument(doctor)
     return parser
 
 
@@ -753,7 +770,163 @@ def _normalize_requested_hosts(config, raw_hosts: tuple[str, ...]) -> tuple[str,
     return None
 
 
+def _normalize_requested_sync_paths(raw_paths: tuple[str, ...], *, require_exists: bool = False) -> tuple[str, ...]:
+    if not raw_paths:
+        return ()
+    normalized = normalize_sync_paths(Path.cwd(), tuple(raw_paths), require_exists=require_exists)
+    return tuple(rel_path for rel_path, _abs_path in normalized)
+
+
+def _resolve_watch_backend(requested_backend: str) -> str:
+    if requested_backend == "poll":
+        return "poll"
+    return "poll"
+
+
+def _watch_scope_label(selected_paths: tuple[str, ...]) -> str:
+    if not selected_paths:
+        return "<整个项目>"
+    return ", ".join(selected_paths)
+
+
+def _print_watch_plan(
+    *,
+    config,
+    remote_dir: str,
+    transport_name: str,
+    debounce_ms: int,
+    requested_backend: str,
+    selected_paths: tuple[str, ...],
+) -> None:
+    resolved_backend = _resolve_watch_backend(requested_backend)
+    print("监听计划:")
+    print(f"目标服务器: {config.connection.host}")
+    print(f"监听后端: {resolved_backend} (requested: {requested_backend})")
+    print(f"本地目录: {Path.cwd()}")
+    print(f"远端目录: {remote_dir}")
+    print(f"传输模式: {transport_name}")
+    print(f"监听范围: {_watch_scope_label(selected_paths)}")
+    print(f"防抖时间: {max(debounce_ms, 100)} ms")
+    print("纯删除事件在 rsync 模式下不会删除远端文件")
+    print("按 Ctrl-C 停止监听")
+
+
+def _summarize_changed_paths(paths: tuple[str, ...]) -> str:
+    preview = ", ".join(paths[:5])
+    if len(paths) > 5:
+        return f"{preview} 等 {len(paths)} 项"
+    return preview
+
+
+def _structured_path_check(path: Path) -> dict[str, str]:
+    return {"status": _path_check_status(path), "path": str(path)}
+
+
+def _resolve_port_payload(config) -> dict[str, str]:
+    try:
+        port, _updated_config = _resolve_port_for_command(config, explicit_port=None)
+    except RuntimeError as exc:
+        return {"status": "error", "message": str(exc)}
+    return {"status": "ok", "value": port}
+
+
+def _build_status_payload(config, config_path: Path) -> dict:
+    ssh_config = _ssh_config_file(config)
+    ssh_private_key = _ssh_private_key_file(config)
+    ssh_public_key = _ssh_public_key_file(config)
+    payload = {
+        "read_only": True,
+        "source_path": str(config_path),
+        "default_target": config.default_host,
+        "targets": list_server_names(config),
+        "auth_mode": config.connection.auth_mode,
+        "port_mode": config.connection.port_mode,
+        "ssh_target": {
+            "host": config.connection.host,
+            "hostname": config.connection.hostname or "",
+        },
+        "remote_dir": _resolve_remote_dir(config),
+        "checks": {
+            "ssh_config": _structured_path_check(ssh_config),
+            "ssh_private_key": _structured_path_check(ssh_private_key),
+            "ssh_public_key": _structured_path_check(ssh_public_key),
+            "ssh_alias": _ssh_alias_status(config),
+            "cpolar_env": _cpolar_env_status(config),
+            "cpolar_credentials": _cpolar_credentials_status(config),
+            "sshpass": _sshpass_status(config),
+        },
+        "port": _resolve_port_payload(config),
+    }
+    warnings: list[str] = []
+    for key in ("ssh_config", "ssh_private_key", "ssh_public_key"):
+        if payload["checks"][key]["status"] != "OK":
+            warnings.append(key)
+    for key in ("ssh_alias", "cpolar_env", "cpolar_credentials", "sshpass"):
+        if not str(payload["checks"][key]).startswith("OK") and not str(payload["checks"][key]).startswith("SKIPPED"):
+            warnings.append(key)
+    if payload["port"]["status"] != "ok":
+        warnings.append("port")
+    payload["warnings"] = warnings
+    return payload
+
+
+def _status_hints(payload: dict, config) -> list[str]:
+    hints: list[str] = []
+    if "ssh_alias" in payload["warnings"]:
+        hints.append(f"检查 SSH config 中是否存在 Host {config.connection.host}")
+    if "port" in payload["warnings"]:
+        hints.append("可先运行 `sr port-sync --json` 预览端口解析结果")
+    return hints
+
+
+def _build_doctor_payload(config, config_path: Path) -> dict:
+    status_payload = _build_status_payload(config, config_path)
+    tools = {
+        name: {"status": "OK" if resolved else "MISSING", "path": resolved or ""}
+        for name, resolved in {
+            "ssh": shutil.which("ssh"),
+            "rsync": shutil.which("rsync"),
+            "code": shutil.which("code"),
+        }.items()
+    }
+    issues = [
+        key
+        for key, tool in tools.items()
+        if tool["status"] != "OK"
+    ]
+    issues.extend(status_payload["warnings"])
+    hints: list[str] = []
+    if "sshpass" in issues:
+        hints.append("安装 sshpass 或将目标切换为 key 认证")
+    if "ssh_alias" in issues:
+        hints.append(f"检查 {_ssh_config_file(config)} 中是否包含 Host {config.connection.host}")
+    if "cpolar_env" in issues or "cpolar_credentials" in issues:
+        hints.append(f"确认 {config.cpolar.env_path} 中包含 CPOLAR_USER 和 CPOLAR_PASS")
+    if "rsync" in issues:
+        hints.append("未安装 rsync 时会自动回退 archive；如需增量同步建议安装 rsync")
+    if "port" in issues:
+        hints.append("sr port-sync --json")
+
+    return {
+        "ok": not issues,
+        "read_only": True,
+        "source_path": str(config_path),
+        "default_target": config.default_host,
+        "tools": tools,
+        "checks": status_payload["checks"],
+        "port": status_payload["port"],
+        "issues": issues,
+        "hints": hints,
+    }
+
+
 def _perform_upload(args: argparse.Namespace, *, config, remote_dir: str, port: str, password: str | None, sync_paths: tuple[str, ...] | None = None) -> bool:
+    requested_paths = tuple(sync_paths if sync_paths is not None else (args.sync_path or ()))
+    try:
+        normalized_sync_paths = _normalize_requested_sync_paths(requested_paths, require_exists=False)
+    except ValueError as exc:
+        print(exc)
+        return False
     return sync_upload(
         local_dir=Path.cwd(),
         remote_dir=remote_dir,
@@ -762,7 +935,7 @@ def _perform_upload(args: argparse.Namespace, *, config, remote_dir: str, port: 
         dry_run=args.dry_run,
         list_excluded=not args.no_list_excluded,
         transport=args.transport,
-        sync_paths=tuple(sync_paths if sync_paths is not None else (args.sync_path or ())),
+        sync_paths=normalized_sync_paths,
         extra_excludes=tuple(args.exclude or ()),
         max_size_mb=args.max_size,
         password=password,
@@ -888,7 +1061,20 @@ def _restrict_watch_paths(changed_paths: set[str], selected_paths: tuple[str, ..
 def _run_watch_loop(args: argparse.Namespace, *, config, remote_dir: str, port: str, password: str | None) -> int:
     project_dir = Path.cwd()
     excludes = tuple(config.sync.excludes) + tuple(args.exclude or ())
-    selected_paths = tuple(Path(path).as_posix().rstrip("/") for path in (args.sync_path or ()))
+    try:
+        selected_paths = _normalize_requested_sync_paths(tuple(args.sync_path or ()), require_exists=False)
+    except ValueError as exc:
+        print(exc)
+        return 1
+    transport_name = args.transport or config.sync.transport
+    _print_watch_plan(
+        config=config,
+        remote_dir=remote_dir,
+        transport_name=transport_name,
+        debounce_ms=args.debounce_ms,
+        requested_backend=args.watch_backend,
+        selected_paths=selected_paths,
+    )
     try:
         for changed_paths in iter_change_batches(
             project_dir,
@@ -898,8 +1084,9 @@ def _run_watch_loop(args: argparse.Namespace, *, config, remote_dir: str, port: 
             sync_paths = _restrict_watch_paths(changed_paths, selected_paths)
             if not sync_paths:
                 continue
+            print(f"检测到改动: {_summarize_changed_paths(sync_paths)}")
             existing_sync_paths = tuple(path for path in sync_paths if (project_dir / path).exists())
-            if not existing_sync_paths and (args.transport or config.sync.transport) == "rsync":
+            if not existing_sync_paths and transport_name == "rsync":
                 print("检测到的改动仅包含删除或已不存在的路径，跳过本次同步")
                 continue
             success = _perform_upload(
@@ -1309,75 +1496,76 @@ def _handle_update(args: argparse.Namespace) -> int:
     return 0 if success else 1
 
 
-def _handle_status() -> int:
+def _handle_status(args: argparse.Namespace) -> int:
     loaded = _load_config_or_report()
     if loaded is None:
         return 1
 
     config, config_path = loaded
-    remote_dir = _resolve_remote_dir(config)
-    ssh_config = _ssh_config_file(config)
-    ssh_private_key = _ssh_private_key_file(config)
-    ssh_public_key = _ssh_public_key_file(config)
-
-    print(f"配置文件: {config_path}")
-    print(f"默认服务器: {config.default_host}")
-    print("服务器列表:")
-    for host in list_server_names(config):
-        suffix = " (default)" if host == config.default_host else ""
-        print(f"  - {host}{suffix}")
-    print(f"认证方式: {config.connection.auth_mode}")
-    print(f"端口模式: {config.connection.port_mode}")
-    print(f"SSH Host: {config.connection.host}")
-    print(f"SSH HostName: {config.connection.hostname or '<none>'}")
-    print(f"SSH 配置文件: {_path_check_status(ssh_config)} ({ssh_config})")
-    print(f"SSH 私钥: {_path_check_status(ssh_private_key)} ({ssh_private_key})")
-    print(f"SSH 公钥: {_path_check_status(ssh_public_key)} ({ssh_public_key})")
-    print(f"SSH Alias: {_ssh_alias_status(config)}")
-    print(f"Cpolar 环境文件: {_cpolar_env_status(config)}")
-    print(f"Cpolar 凭证: {_cpolar_credentials_status(config)}")
-    print(f"sshpass: {_sshpass_status(config)}")
-    print(f"远端目录: {remote_dir}")
-    try:
-        port, _updated_config = _resolve_port_for_command(config, explicit_port=None)
-        print(f"端口: {port}")
-    except RuntimeError as exc:
-        print(f"端口: 未解析 ({exc})")
+    payload = _build_status_payload(config, config_path)
+    text_lines = [
+        f"配置文件: {config_path}",
+        f"默认服务器: {config.default_host}",
+        "服务器列表:",
+        *[
+            f"  - {host}{' (default)' if host == config.default_host else ''}"
+            for host in list_server_names(config)
+        ],
+        f"认证方式: {config.connection.auth_mode}",
+        f"端口模式: {config.connection.port_mode}",
+        f"SSH Host: {config.connection.host}",
+        f"SSH HostName: {config.connection.hostname or '<none>'}",
+        f"SSH 配置文件: {payload['checks']['ssh_config']['status']} ({payload['checks']['ssh_config']['path']})",
+        f"SSH 私钥: {payload['checks']['ssh_private_key']['status']} ({payload['checks']['ssh_private_key']['path']})",
+        f"SSH 公钥: {payload['checks']['ssh_public_key']['status']} ({payload['checks']['ssh_public_key']['path']})",
+        f"SSH Alias: {payload['checks']['ssh_alias']}",
+        f"Cpolar 环境文件: {payload['checks']['cpolar_env']}",
+        f"Cpolar 凭证: {payload['checks']['cpolar_credentials']}",
+        f"sshpass: {payload['checks']['sshpass']}",
+        f"远端目录: {payload['remote_dir']}",
+        (
+            f"端口: {payload['port']['value']}"
+            if payload["port"]["status"] == "ok"
+            else f"端口: 未解析 ({payload['port']['message']})"
+        ),
+    ]
+    hints = _status_hints(payload, config)
+    if hints:
+        text_lines.extend(["提示:", *[f"  - {hint}" for hint in hints]])
+    _emit_output(payload=payload, text_lines=text_lines, as_json=args.json)
     return 0
 
 
-def _handle_doctor() -> int:
-    checks = {
-        "ssh": shutil.which("ssh"),
-        "rsync": shutil.which("rsync"),
-        "code": shutil.which("code"),
-    }
-    for name, resolved in checks.items():
-        status = "OK" if resolved else "MISSING"
-        print(f"{name}: {status}{f' ({resolved})' if resolved else ''}")
-
+def _handle_doctor(args: argparse.Namespace) -> int:
     try:
         config, config_path = load_project_config(Path.cwd())
     except FileNotFoundError as exc:
         print(exc)
         return 1
 
-    print(f"config: OK ({config_path})")
-    print(f"sshpass: {_sshpass_status(config)}")
-    ssh_config = _ssh_config_file(config)
-    ssh_private_key = _ssh_private_key_file(config)
-    ssh_public_key = _ssh_public_key_file(config)
-    print(f"ssh_config: {_path_check_status(ssh_config)} ({ssh_config})")
-    print(f"ssh_private_key: {_path_check_status(ssh_private_key)} ({ssh_private_key})")
-    print(f"ssh_public_key: {_path_check_status(ssh_public_key)} ({ssh_public_key})")
-    print(f"ssh_alias: {_ssh_alias_status(config)}")
-    print(f"cpolar_env: {_cpolar_env_status(config)}")
-    print(f"cpolar_credentials: {_cpolar_credentials_status(config)}")
-    try:
-        port, _updated_config = _resolve_port_for_command(config, explicit_port=None)
-        print(f"port: OK ({port})")
-    except RuntimeError as exc:
-        print(f"port: ERROR ({exc})")
+    payload = _build_doctor_payload(config, config_path)
+    text_lines = [
+        *[
+            f"{name}: {tool['status']}" + (f" ({tool['path']})" if tool["path"] else "")
+            for name, tool in payload["tools"].items()
+        ],
+        f"config: OK ({config_path})",
+        f"sshpass: {payload['checks']['sshpass']}",
+        f"ssh_config: {payload['checks']['ssh_config']['status']} ({payload['checks']['ssh_config']['path']})",
+        f"ssh_private_key: {payload['checks']['ssh_private_key']['status']} ({payload['checks']['ssh_private_key']['path']})",
+        f"ssh_public_key: {payload['checks']['ssh_public_key']['status']} ({payload['checks']['ssh_public_key']['path']})",
+        f"ssh_alias: {payload['checks']['ssh_alias']}",
+        f"cpolar_env: {payload['checks']['cpolar_env']}",
+        f"cpolar_credentials: {payload['checks']['cpolar_credentials']}",
+        (
+            f"port: OK ({payload['port']['value']})"
+            if payload["port"]["status"] == "ok"
+            else f"port: ERROR ({payload['port']['message']})"
+        ),
+    ]
+    if payload["hints"]:
+        text_lines.extend(["建议:", *[f"  - {hint}" for hint in payload["hints"]]])
+    _emit_output(payload=payload, text_lines=text_lines, as_json=args.json)
     return 0
 
 
@@ -1431,9 +1619,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "update":
         return _handle_update(args)
     if args.command == "status":
-        return _handle_status()
+        return _handle_status(args)
     if args.command == "doctor":
-        return _handle_doctor()
+        return _handle_doctor(args)
 
     parser.print_help()
     return 1

@@ -125,6 +125,7 @@ def test_watch_help_mentions_long_and_short_commands(capsys) -> None:
     assert "默认防抖时间为 1000ms" in captured.out
     assert "仅预览将要执行的上传操作，不真正传输文件" in captured.out
     assert "--debounce-ms" in captured.out
+    assert "--watch-backend {auto,poll}" in captured.out
 
 
 def test_backup_help_describes_output_defaults(capsys) -> None:
@@ -150,6 +151,7 @@ def test_status_help_describes_report_contents(capsys) -> None:
     assert "服务器列表、认证方式" in captured.out
     assert "认证方式、SSH 配置文件、私钥、公钥和别名状态" in captured.out
     assert "适合在 upload/download/open 前先确认配置解析结果" in captured.out
+    assert "--json" in captured.out
 
 
 def test_doctor_help_describes_checks(capsys) -> None:
@@ -162,6 +164,7 @@ def test_doctor_help_describes_checks(capsys) -> None:
     assert "检查 ssh、rsync、code、sshpass、配置文件、SSH 文件和端口解析状态" in captured.out
     assert "SSH 配置文件、私钥、公钥、别名以及 password 模式所需的 sshpass" in captured.out
     assert "适合在首次联机前排查环境问题" in captured.out
+    assert "--json" in captured.out
 
 
 def test_switch_help_describes_default_host_switching(capsys) -> None:

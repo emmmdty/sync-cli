@@ -17,14 +17,15 @@
   - fresh-worktree `uv sync` is blocked in this sandbox because the lockfile registry points to a network mirror; phase verification uses the existing repo `.venv` plus worktree `PYTHONPATH`.
 
 ## Active phase
-- Phase: Phase 3 (pending)
-- Branch: `codex/phase-03-watch-docs` (to be created from clean `main`)
-- Worktree: pending creation from `/home/tjk/myProjects/sync-cli/.worktrees/codex-main-integration`
-- Goal: improve watch UX, read-only diagnostics ergonomics, and Chinese-first docs without widening the product boundary beyond SSH remote-development sync.
+- Phase: Final cleanup (pending)
+- Branch: integration `main` after Phase 3 merge
+- Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/codex-main-integration`
+- Goal: merge the accepted Phase 3 work, keep Phase 4 deferred unless a clearly safe hardening slice appears, then finish cleanup without touching preserved user worktrees.
 - Planned acceptance:
   - full test suite passes
-  - watch and UX changes remain explicit and safe
-  - docs are coherent and bilingual enough for release readiness
+  - Phase 3 work is merged and reverified on `main`
+  - Phase 4 is either explicitly deferred or tightly justified
+  - final cleanup evidence is recorded
 
 ## Completed phases
 
@@ -53,20 +54,22 @@
 - Cleanup result: removed the `codex/phase-02-cli-config` worktree and deleted the phase branch
 
 ### Phase 3
-- Summary:
+- Summary: made watch mode more legible and explicit by adding a safe `--watch-backend` selector, startup watch-plan output, and normalized `sync-path` handling for Windows-style separators; added read-only `--json` output for `status` and `doctor` with actionable hints; added English quickstart plus migration, troubleshooting, and release-note docs to make the repo release-ready without widening product scope.
 - Tests:
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_transport.py tests/test_help.py tests/test_commands.py -q` -> `59 passed in 3.23s`
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_packaging.py -q` -> `5 passed in 0.05s`
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q` -> `88 passed in 1.80s`
 - Merge result:
 - Cleanup result:
 
 ### Phase 4 (optional)
-- Summary:
-- Tests:
-- Merge result:
-- Cleanup result:
+- Summary: deferred intentionally. Snapshot / pull / recovery hardening would need additional state-model decisions and risk widening the product beyond a safe SSH remote-development sync CLI in this run.
+- Tests: not started
+- Merge result: not applicable
+- Cleanup result: not applicable
 
 ## Open risks / deferred items
-- Phase 3 still needs to improve watch UX and docs without expanding into a general sync platform.
-- Windows + WSL path behavior still needs explicit UX hardening and documentation coverage.
+- Phase 4 snapshot / pull / recovery hardening is deferred to keep scope narrow and avoid accidental two-way-sync semantics.
 - Final cleanup must distinguish Codex-created worktrees/branches from pre-existing user worktrees/branches that were explicitly preserved.
 
 ## Final cleanup checklist

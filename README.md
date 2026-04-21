@@ -4,6 +4,8 @@
 
 主命令是 `sync-remote`，同时提供简写别名 `sr`。
 
+English quickstart: [README.en.md](README.en.md)
+
 ## 适用场景
 
 - 需要在本地项目目录和远端开发机之间高频同步代码
@@ -20,10 +22,12 @@
 - 支持 `target list`、`target use`、`target remove` 管理多目标配置
 - 支持 `config validate`、`config explain`、`config migrate` 检查和规范化配置
 - `doctor`、`status` 默认只读，不会静默改写项目配置或 SSH config
+- `status --json`、`doctor --json` 可输出结构化诊断结果，适合脚本或 CI 检查
 - `upload`、`download`、`open`、`watch`、`doctor` 默认都作用于当前默认服务器
 - `upload --hosts` 可一次上传到一个或多个指定服务器
 - `upload --all-targets` 会并发上传到配置中的所有服务器，失败不会中断后续任务
 - `port-sync` 默认只预览动态端口解析结果，显式 `--apply` 后才会写回项目配置
+- `watch` 默认使用安全的轮询后端；可显式指定 `--watch-backend poll`
 - 支持 `key` 和 `password` 两种认证模式
 - 支持 `auto` 和 `fixed` 两种 SSH 端口模式
 - 支持 `version` 查看当前版本，`update` 从 GitHub 自更新
@@ -182,6 +186,13 @@ sync-remote port-sync --help
 sync-remote update --help
 ```
 
+## 文档导航
+
+- 英文快速参考：`README.en.md`
+- 迁移说明：`docs/MIGRATION.md`
+- 故障排查：`docs/TROUBLESHOOTING.md`
+- 发布说明模板：`docs/RELEASE_NOTES.md`
+
 ## 配置说明
 
 运行 `sync-remote init` 后，会在当前目录生成或更新 `sync-remote.yaml`。
@@ -336,6 +347,7 @@ sr op
 
 ```bash
 sr watch
+sr watch --watch-backend poll
 sync-remote open --watch
 ```
 
@@ -357,6 +369,8 @@ sr up --hosts gpu-a gpu-b
 sr config validate
 sr config explain
 sr config migrate --apply
+sr status --json
+sr doctor --json
 ```
 
 ### 预览或应用端口同步

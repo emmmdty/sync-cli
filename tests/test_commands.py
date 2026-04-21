@@ -651,6 +651,43 @@ def test_watch_alias_wt_runs_initial_upload_and_incremental_sync(tmp_path: Path,
     ]
 
 
+def test_watch_prints_plan_and_normalizes_windows_style_selected_paths(tmp_path: Path, monkeypatch, capsys) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    (project_dir / "src").mkdir()
+    (project_dir / "src" / "app.py").write_text("print('hi')\n", encoding="utf-8")
+    events: list[tuple[str, object]] = []
+
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr("sync_remote.cli.load_project_config", lambda cwd=None: (build_config(), project_dir / "sync-remote.yaml"))
+    monkeypatch.setattr("sync_remote.cli.resolve_connection_port", lambda config, explicit_port=None: "2222")
+
+    def fake_batches(*_args, **_kwargs):
+        yield {"src/app.py"}
+
+    def fake_upload(*, sync_paths, **_kwargs):
+        events.append(("upload", tuple(sync_paths)))
+        if len(events) > 1:
+            raise KeyboardInterrupt
+        return True
+
+    monkeypatch.setattr("sync_remote.cli.iter_change_batches", fake_batches)
+    monkeypatch.setattr("sync_remote.cli.sync_upload", fake_upload)
+
+    exit_code = main(["watch", "--sync-path", "src\\app.py"])
+
+    assert exit_code == 0
+    assert events == [
+        ("upload", ("src/app.py",)),
+        ("upload", ("src/app.py",)),
+    ]
+    captured = capsys.readouterr()
+    assert "监听计划:" in captured.out
+    assert "监听后端: poll (requested: auto)" in captured.out
+    assert "监听范围: src/app.py" in captured.out
+    assert "按 Ctrl-C 停止监听" in captured.out
+
+
 def test_open_watch_opens_remote_then_enters_watch_loop(tmp_path: Path, monkeypatch) -> None:
     project_dir = tmp_path / "demo"
     project_dir.mkdir()
@@ -771,6 +808,91 @@ def test_doctor_reports_missing_ssh_config_public_key_and_sshpass(tmp_path: Path
     assert "ssh_alias: MISSING" in captured.out
     assert f"cpolar_env: MISSING ({config.cpolar.env_path})" in captured.out
     assert f"cpolar_credentials: MISSING ({config.cpolar.env_path})" in captured.out
+
+
+def test_status_json_reports_read_only_diagnostics_and_port_resolution(tmp_path: Path, monkeypatch, capsys) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    ssh_config = tmp_path / "ssh_config"
+    ssh_config.write_text("Host gpu\n", encoding="utf-8")
+    ssh_private_key = tmp_path / "id_ed25519"
+    ssh_private_key.write_text("PRIVATE", encoding="utf-8")
+    ssh_public_key = tmp_path / "id_ed25519.pub"
+    ssh_public_key.write_text("ssh-ed25519 AAAA test\n", encoding="utf-8")
+
+    config = build_config(
+        ssh_config_path=str(ssh_config),
+        ssh_key_path=str(ssh_private_key),
+        auth_mode="password",
+        port_mode="auto",
+        port=None,
+        host="cpolar-server",
+        hostname="example.tcp.vip.cpolar.cn",
+        tunnel_name="my-tunnel",
+        env_path=str(tmp_path / ".env"),
+    )
+
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr("sync_remote.cli.load_project_config", lambda cwd=None: (config, project_dir / "sync-remote.yaml"))
+    monkeypatch.setattr("sync_remote.cli.resolve_connection_port", lambda config, explicit_port=None: "45678")
+    monkeypatch.setattr("sync_remote.cli._ssh_alias_status", lambda config: "OK")
+    monkeypatch.setattr("sync_remote.cli._cpolar_env_status", lambda config: f"OK ({config.cpolar.env_path})")
+    monkeypatch.setattr("sync_remote.cli._cpolar_credentials_status", lambda config: f"OK ({config.cpolar.env_path})")
+    monkeypatch.setattr("sync_remote.cli._sshpass_status", lambda config: "OK (/usr/bin/sshpass)")
+
+    exit_code = main(["status", "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["read_only"] is True
+    assert payload["default_target"] == "cpolar-server"
+    assert payload["port"]["status"] == "ok"
+    assert payload["port"]["value"] == "45678"
+    assert payload["checks"]["ssh_alias"] == "OK"
+    assert payload["checks"]["ssh_private_key"]["status"] == "OK"
+    assert payload["checks"]["sshpass"] == "OK (/usr/bin/sshpass)"
+
+
+def test_doctor_json_reports_issues_and_actionable_hints(tmp_path: Path, monkeypatch, capsys) -> None:
+    project_dir = tmp_path / "demo"
+    project_dir.mkdir()
+    ssh_config = tmp_path / "missing_config"
+    ssh_private_key = tmp_path / "id_ed25519"
+    ssh_public_key = tmp_path / "id_ed25519.pub"
+
+    config = build_config(
+        ssh_config_path=str(ssh_config),
+        ssh_key_path=str(ssh_private_key),
+        auth_mode="password",
+        port_mode="auto",
+        port=None,
+        host="cpolar-server",
+        hostname="example.tcp.vip.cpolar.cn",
+        tunnel_name="my-tunnel",
+        env_path=str(tmp_path / ".env"),
+    )
+
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr("sync_remote.cli.load_project_config", lambda cwd=None: (config, project_dir / "sync-remote.yaml"))
+    monkeypatch.setattr("sync_remote.cli.shutil.which", lambda name: None if name == "sshpass" else f"/usr/bin/{name}")
+    monkeypatch.setattr("sync_remote.cli._ssh_alias_status", lambda config: "MISSING")
+    monkeypatch.setattr("sync_remote.cli._cpolar_env_status", lambda config: f"MISSING ({config.cpolar.env_path})")
+    monkeypatch.setattr("sync_remote.cli._cpolar_credentials_status", lambda config: f"MISSING ({config.cpolar.env_path})")
+    monkeypatch.setattr(
+        "sync_remote.cli.resolve_connection_port",
+        lambda config, explicit_port=None: (_ for _ in ()).throw(RuntimeError("cpolar login failed")),
+    )
+
+    exit_code = main(["doctor", "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert "sshpass" in payload["issues"]
+    assert "ssh_alias" in payload["issues"]
+    assert "cpolar_env" in payload["issues"]
+    assert payload["port"]["status"] == "error"
+    assert "sr port-sync --json" in payload["hints"]
 
 
 def test_switch_updates_default_host_and_persists_config(tmp_path: Path, monkeypatch) -> None:
