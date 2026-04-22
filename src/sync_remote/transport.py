@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+import html
 from pathlib import Path
 import fnmatch
 import os
@@ -11,15 +13,23 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from urllib.parse import urlparse
 
 import requests
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 from .config import ProjectConfig, expand_user_path
 from .operations import create_tar_archive
 from .ssh_config import SSHHostEntry, parse_ssh_config_blocks, read_ssh_host_entry, select_ssh_block, upsert_ssh_host_entry
 
 RSYNC_RETRYABLE_EXIT_CODES = {10, 11, 12, 30, 35, 255}
+
+
+@dataclass(frozen=True)
+class CpolarStatusEntry:
+    tunnel_name: str
+    hostname: str
+    port: str
 
 
 def generate_secure_temp_name(prefix: str = "sync", suffix: str = ".tar.gz") -> str:
@@ -107,19 +117,74 @@ def update_ssh_port_in_config(new_port: str, config: ProjectConfig) -> None:
     )
 
 
-def get_port_from_cpolar(config: ProjectConfig) -> str | None:
-    if not config.cpolar.tunnel_name:
+def _strip_html(value: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", value)).strip()
+
+
+def parse_cpolar_status_entries(status_html: str) -> list[CpolarStatusEntry]:
+    entries: list[CpolarStatusEntry] = []
+    for row in re.findall(r"<tr\b[^>]*>(.*?)</tr>", status_html, re.DOTALL | re.IGNORECASE):
+        cells = re.findall(r"<td\b[^>]*>(.*?)</td>", row, re.DOTALL | re.IGNORECASE)
+        if not cells:
+            continue
+        tunnel_name = _strip_html(cells[0])
+        if not tunnel_name:
+            continue
+
+        for endpoint in re.findall(r"<a\b[^>]*>(.*?)</a>", row, re.DOTALL | re.IGNORECASE):
+            cleaned_endpoint = _strip_html(endpoint)
+            parsed = urlparse(cleaned_endpoint if "://" in cleaned_endpoint else f"//{cleaned_endpoint}")
+            try:
+                port = parsed.port
+            except ValueError:
+                continue
+            if not parsed.hostname or port is None:
+                continue
+            entries.append(
+                CpolarStatusEntry(
+                    tunnel_name=tunnel_name,
+                    hostname=parsed.hostname,
+                    port=str(port),
+                )
+            )
+    return entries
+
+
+def resolve_cpolar_port(
+    entries: list[CpolarStatusEntry],
+    *,
+    tunnel_name: str,
+    hostname: str,
+) -> str | None:
+    matching_entries = [
+        entry
+        for entry in entries
+        if entry.tunnel_name.casefold() == tunnel_name.strip().casefold()
+        and entry.hostname.casefold() == hostname.strip().casefold()
+    ]
+    if not matching_entries:
         return None
 
-    env_path = Path(expand_user_path(config.cpolar.env_path))
-    if env_path.exists():
-        load_dotenv(env_path)
+    ports = {entry.port for entry in matching_entries}
+    if len(ports) > 1:
+        raise RuntimeError(
+            f"cpolar 中 {hostname} / {tunnel_name} 对应多个不同端口: {', '.join(sorted(ports))}"
+        )
+    return next(iter(ports))
 
-    username = os.environ.get("CPOLAR_USER")
-    password = os.environ.get("CPOLAR_PASS")
+
+def _load_cpolar_credentials(env_path: Path | str) -> tuple[str, str]:
+    resolved_env_path = Path(expand_user_path(env_path))
+    values = dict(dotenv_values(resolved_env_path)) if resolved_env_path.exists() else {}
+    username = os.environ.get("CPOLAR_USER") or values.get("CPOLAR_USER")
+    password = os.environ.get("CPOLAR_PASS") or values.get("CPOLAR_PASS")
     if not username or not password:
-        return None
+        raise RuntimeError("缺少 CPOLAR_USER 或 CPOLAR_PASS")
+    return username, password
 
+
+def fetch_cpolar_status_entries(*, env_path: str = "~/.env") -> list[CpolarStatusEntry]:
+    username, password = _load_cpolar_credentials(env_path)
     login_url = "https://dashboard.cpolar.com/login"
     target_url = "https://dashboard.cpolar.com/status"
     headers = {
@@ -128,7 +193,10 @@ def get_port_from_cpolar(config: ProjectConfig) -> str | None:
     }
 
     with requests.Session() as session:
-        session.get(login_url, timeout=10)
+        login_page = session.get(login_url, timeout=10)
+        if login_page.status_code != 200:
+            raise RuntimeError("访问 cpolar 登录页失败")
+
         response = session.post(
             login_url,
             data={"login": username, "password": password},
@@ -136,26 +204,26 @@ def get_port_from_cpolar(config: ProjectConfig) -> str | None:
             timeout=10,
         )
         if response.status_code != 200 or "dashboard" not in response.url:
-            return None
+            raise RuntimeError("cpolar 登录失败，请检查 ~/.env 中的凭证")
 
         target_response = session.get(target_url, headers=headers, timeout=10)
         if target_response.status_code != 200:
-            return None
+            raise RuntimeError("获取 cpolar 状态页失败")
 
-        pattern = (
-            rf"<tr>.*?<td>{re.escape(config.cpolar.tunnel_name)}</td>.*?"
-            rf"<a[^>]*>(.*?)</a>.*?</tr>"
+        return parse_cpolar_status_entries(target_response.text)
+
+
+def get_port_from_cpolar(config: ProjectConfig) -> str | None:
+    if not config.cpolar.tunnel_name:
+        return None
+    try:
+        return resolve_cpolar_port(
+            fetch_cpolar_status_entries(env_path=config.cpolar.env_path),
+            tunnel_name=config.cpolar.tunnel_name,
+            hostname=config.connection.hostname,
         )
-        match = re.search(pattern, target_response.text, re.DOTALL)
-        if not match:
-            return None
-
-        extracted_url = match.group(1)
-        if ":" not in extracted_url:
-            return None
-
-        port = extracted_url.rsplit(":", maxsplit=1)[-1]
-        return port
+    except RuntimeError:
+        return None
 
 
 def resolve_connection_port(config: ProjectConfig, explicit_port: str | None = None) -> str:
