@@ -14,14 +14,20 @@
   - `sync-remote update --help` said auto-update only supported `uv tool install`, while README documented both `uv tool install` and `uv tool install --editable`
   - `status --help` and `doctor --help` did not explicitly say they are read-only, even though the product rules and README rely on that safety promise
   - `status --help` and `doctor --help` examples did not show the supported `--json` form, which made the machine-readable path less discoverable
+  - final acceptance on `main` exposed a flaky batch-upload test that assumed deterministic thread execution order for `upload-all-gpu`
 - Changes implemented:
   - aligned `update --help` with the documented supported install modes
   - added explicit read-only wording to `status --help` and `doctor --help`
   - added `sr status --json` and `sr doctor --json` examples to those help surfaces
   - tightened `tests/test_help.py` to lock the updated contracts
+  - relaxed the flaky `upload-all-gpu` regression test to assert the expected target set rather than thread scheduling order
 - Verification:
   - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_help.py::test_status_help_describes_report_contents tests/test_help.py::test_doctor_help_describes_checks tests/test_help.py::test_update_help_describes_channels -q`
   - Result: `3 passed in 0.11s`
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_commands.py::test_upload_all_gpu_continues_after_failures_and_reports_summary -q`
+  - Result: `1 passed in 0.14s`
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q`
+  - Result: `109 passed in 0.69s`
 
 ## 2026-04-22 audit: help / docs / learnability sync
 - Branch: `fix/docs-help-audit`

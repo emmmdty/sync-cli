@@ -975,10 +975,10 @@ def test_upload_all_gpu_continues_after_failures_and_reports_summary(
     exit_code = main(["upload-all-gpu"])
 
     assert exit_code == 1
-    assert attempts == [
+    assert sorted(attempts) == sorted([
         ("gpu-a", "/srv/work/demo", "2222"),
         ("gpu-b", "/srv/work/demo", "2200"),
-    ]
+    ])
     captured = capsys.readouterr()
     assert "gpu-a" in captured.out
     assert "gpu-b" in captured.out
