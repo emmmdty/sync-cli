@@ -696,7 +696,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "从 GitHub 更新当前工具版本。\n"
             "可执行命令: `sync-remote update` 或 `sr update`\n\n"
             "行为说明:\n"
-            "  - 仅支持通过 `uv tool install` 安装的命令进行自动更新\n"
+            "  - 仅支持通过 `uv tool install` 或 `uv tool install --editable` 安装的命令进行自动更新\n"
             "  - 默认优先使用最新 Release\n"
             "  - 若最新 Release/Tag 版本低于当前基线版本，则自动切换到 main\n"
             "  - 支持显式指定 `main` 或 `release` 通道"
@@ -718,11 +718,13 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         description=(
             "显示当前默认服务器、生效配置、SSH 目标、SSH 文件状态、远端目录和端口解析结果。\n"
             "会显示服务器列表、认证方式、SSH 配置文件、私钥、公钥和别名状态。\n"
+            "默认只读，不会改写项目配置或 SSH config。\n"
             "适合在 upload/download/open 前先确认配置解析结果。"
         ),
         epilog=(
             "示例:\n"
             "  sr status\n"
+            "  sr status --json\n"
             "  sync-remote status"
         ),
         formatter_class=HelpFormatter,
@@ -737,11 +739,13 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         description=(
             "检查 ssh、rsync、code、sshpass、配置文件、SSH 文件和端口解析状态。\n"
             "会检查当前默认服务器对应的 SSH 配置文件、私钥、公钥、别名以及 password 模式所需的 sshpass。\n"
+            "默认只读，不会改写项目配置或 SSH config。\n"
             "适合在首次联机前排查环境问题。"
         ),
         epilog=(
             "示例:\n"
             "  sr doctor\n"
+            "  sr doctor --json\n"
             "  sync-remote doctor"
         ),
         formatter_class=HelpFormatter,

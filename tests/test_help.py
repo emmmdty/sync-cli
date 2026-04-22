@@ -157,7 +157,9 @@ def test_status_help_describes_report_contents(capsys) -> None:
     assert "服务器列表、认证方式" in captured.out
     assert "认证方式、SSH 配置文件、私钥、公钥和别名状态" in captured.out
     assert "适合在 upload/download/open 前先确认配置解析结果" in captured.out
+    assert "默认只读，不会改写项目配置或 SSH config" in captured.out
     assert "--json" in captured.out
+    assert "sr status --json" in captured.out
 
 
 def test_doctor_help_describes_checks(capsys) -> None:
@@ -170,7 +172,9 @@ def test_doctor_help_describes_checks(capsys) -> None:
     assert "检查 ssh、rsync、code、sshpass、配置文件、SSH 文件和端口解析状态" in captured.out
     assert "SSH 配置文件、私钥、公钥、别名以及 password 模式所需的 sshpass" in captured.out
     assert "适合在首次联机前排查环境问题" in captured.out
+    assert "默认只读，不会改写项目配置或 SSH config" in captured.out
     assert "--json" in captured.out
+    assert "sr doctor --json" in captured.out
 
 
 def test_switch_help_describes_default_host_switching(capsys) -> None:
@@ -321,5 +325,5 @@ def test_update_help_describes_channels(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote update" in captured.out
     assert "--channel {main,release}" in captured.out
-    assert "仅支持通过 `uv tool install` 安装的命令进行自动更新" in captured.out
+    assert "仅支持通过 `uv tool install` 或 `uv tool install --editable` 安装的命令进行自动更新" in captured.out
     assert "默认优先使用最新 Release" in captured.out

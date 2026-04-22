@@ -1,5 +1,28 @@
 # Codex progress log
 
+## 2026-04-22 follow-up audit: diagnostics/update help alignment
+- Branch: `fix/audit-followup`
+- Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/audit-followup`
+- Baseline tests executed before edits:
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q`
+  - Result: `109 passed in 0.98s`
+- Additional evidence collected:
+  - root and wrapper help already reflected canonical commands and compatibility aliases correctly
+  - README and tutorial links were already present and covered the expected beginner workflows
+  - remaining gaps were concentrated in leaf help wording, not in command behavior
+- Concrete follow-up findings:
+  - `sync-remote update --help` said auto-update only supported `uv tool install`, while README documented both `uv tool install` and `uv tool install --editable`
+  - `status --help` and `doctor --help` did not explicitly say they are read-only, even though the product rules and README rely on that safety promise
+  - `status --help` and `doctor --help` examples did not show the supported `--json` form, which made the machine-readable path less discoverable
+- Changes implemented:
+  - aligned `update --help` with the documented supported install modes
+  - added explicit read-only wording to `status --help` and `doctor --help`
+  - added `sr status --json` and `sr doctor --json` examples to those help surfaces
+  - tightened `tests/test_help.py` to lock the updated contracts
+- Verification:
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_help.py::test_status_help_describes_report_contents tests/test_help.py::test_doctor_help_describes_checks tests/test_help.py::test_update_help_describes_channels -q`
+  - Result: `3 passed in 0.11s`
+
 ## 2026-04-22 audit: help / docs / learnability sync
 - Branch: `fix/docs-help-audit`
 - Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/audit-help-docs`
