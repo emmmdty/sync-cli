@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -147,16 +148,27 @@ def _uv_tool_bin_dir() -> Path | None:
     return Path(value)
 
 
+def _invoked_executable_path() -> Path | None:
+    argv0 = Path(sys.argv[0]).expanduser()
+    if argv0.is_absolute():
+        return argv0
+
+    discovered = shutil.which(argv0.name or str(argv0))
+    if not discovered:
+        return None
+    return Path(discovered)
+
+
 def _is_supported_uv_tool_install() -> bool:
     bin_dir = _uv_tool_bin_dir()
     if bin_dir is None:
         return False
-    argv0 = Path(sys.argv[0])
-    try:
-        resolved = argv0.resolve()
-    except OSError:
+
+    executable = _invoked_executable_path()
+    if executable is None:
         return False
-    return resolved.parent == bin_dir.resolve() and resolved.name in EXECUTABLE_NAMES
+
+    return executable.parent.resolve() == bin_dir.resolve() and executable.name in EXECUTABLE_NAMES
 
 
 def _run_uv_tool_install(spec: str) -> tuple[bool, str]:

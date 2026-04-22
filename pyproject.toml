@@ -1,6 +1,6 @@
 [project]
 name = "sync-remote"
-version = "0.6.0"
+version = "0.6.1"
 description = "CLI tool for syncing the current project directory to a remote server"
 readme = "README.md"
 license = "MIT"

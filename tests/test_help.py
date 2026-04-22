@@ -314,7 +314,7 @@ def test_version_help_describes_current_version_output(capsys) -> None:
     captured = capsys.readouterr()
     assert "usage: sync-remote version" in captured.out
     assert "显示当前安装版本号" in captured.out
-    assert "0.6.0-main-YYYY-MM-DD" in captured.out
+    assert "0.6.1-main-YYYY-MM-DD" in captured.out
 
 
 def test_update_help_describes_channels(capsys) -> None:

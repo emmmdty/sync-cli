@@ -1,5 +1,22 @@
 # Codex progress log
 
+## 2026-04-22 hotfix: sr update uv-tool detection
+- Branch: `fix/update-autoupdate`
+- Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/fix-update-autoupdate`
+- Baseline tests executed before edits:
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest -q`
+  - Result: `113 passed in 0.94s`
+- Concrete hotfix finding:
+  - `sr update` incorrectly rejected standard `uv tool install` / `uv tool install --editable` installs because `_is_supported_uv_tool_install()` compared the resolved target binary directory with `uv tool dir --bin`
+  - on a normal uv-tool install, `sr` is invoked from the shim path under `~/.local/bin`, while `Path(...).resolve()` points at `~/.local/share/uv/tools/.../bin/sr`, so the check returned false before any GitHub download started
+- Changes implemented:
+  - added regression tests covering uv-tool shim paths, bare command-name PATH lookup, and non-uv-tool command paths
+  - changed self-update detection to validate the invoked executable path in the uv tool bin directory instead of following the symlink target
+  - bumped the package / help examples to `0.6.1`
+- Verification:
+  - `PYTHONPATH=$PWD/src /home/tjk/myProjects/sync-cli/.venv/bin/python -m pytest tests/test_self_update.py -q`
+  - Result: `8 passed in 0.09s`
+
 ## 2026-04-22 follow-up audit: diagnostics/update help alignment
 - Branch: `fix/audit-followup`
 - Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/audit-followup`
