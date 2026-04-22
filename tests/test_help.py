@@ -12,7 +12,7 @@ def test_top_level_help_mentions_both_command_names_and_examples(capsys) -> None
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "usage: sync-remote" in captured.out
-    assert "远程同步命令行工具" in captured.out
+    assert "SSH-first 远程开发同步命令行工具" in captured.out
     assert "sync-remote  完整命令名" in captured.out
     assert "sr           简写别名" in captured.out
     assert "upload (up)" in captured.out
@@ -39,6 +39,10 @@ def test_top_level_help_mentions_both_command_names_and_examples(capsys) -> None
     assert "sr target list" in captured.out
     assert "sr config validate" in captured.out
     assert "sr port-sync --json" in captured.out
+    assert "sr up --all-targets" in captured.out
+    assert "兼容命令：切换默认上传服务器（推荐 `target use`）" in captured.out
+    assert "兼容命令：删除指定服务器配置（推荐 `target remove`）" in captured.out
+    assert "兼容命令：上传到所有已配置服务器（推荐 `upload --all-targets`）" in captured.out
 
 
 def test_init_help_explains_generated_config_and_modes(capsys) -> None:
@@ -74,8 +78,10 @@ def test_upload_help_mentions_long_and_short_commands(capsys) -> None:
     assert "覆盖配置中的最大文件大小限制，单位 MB" in captured.out
     assert "临时覆盖本次连接端口，优先级高于配置和自动解析" in captured.out
     assert "--hosts" in captured.out
+    assert "--all-targets" in captured.out
     assert "不输出排除文件统计信息" in captured.out
     assert "password 模式会在命令执行前提示输入服务器密码" in captured.out
+    assert "sr up --all-targets" in captured.out
 
 
 def test_download_help_mentions_long_and_short_commands(capsys) -> None:
@@ -228,6 +234,34 @@ def test_target_help_describes_canonical_target_subcommands(capsys) -> None:
     assert "port-sync" in captured.out
 
 
+def test_target_use_help_mentions_canonical_and_compatibility_commands(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["target", "use", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote target use" in captured.out
+    assert "切换当前项目默认使用的目标服务器" in captured.out
+    assert "可执行命令: `sync-remote target use` 或 `sr target use`" in captured.out
+    assert "兼容命令: `sync-remote switch` 或 `sr switch`" in captured.out
+    assert "示例:" in captured.out
+    assert "sr target use gpu-b" in captured.out
+
+
+def test_target_port_sync_help_mentions_target_tree_and_preview_apply(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["target", "port-sync", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote target port-sync" in captured.out
+    assert "默认只预览，不写配置文件，也不写 SSH config" in captured.out
+    assert "可执行命令: `sync-remote target port-sync` 或 `sr target port-sync`" in captured.out
+    assert "等价短写: `sync-remote port-sync` 或 `sr port-sync`" in captured.out
+    assert "示例:" in captured.out
+    assert "sr target port-sync gpu-a --json" in captured.out
+
+
 def test_config_help_describes_validation_and_migration_subcommands(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["config", "--help"])
@@ -239,6 +273,33 @@ def test_config_help_describes_validation_and_migration_subcommands(capsys) -> N
     assert "validate" in captured.out
     assert "explain" in captured.out
     assert "migrate" in captured.out
+
+
+def test_config_validate_help_mentions_read_only_check_and_examples(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["config", "validate", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote config validate" in captured.out
+    assert "检查当前项目配置是否可读取，不改写配置文件" in captured.out
+    assert "可执行命令: `sync-remote config validate` 或 `sr config validate`" in captured.out
+    assert "示例:" in captured.out
+    assert "sr config validate --json" in captured.out
+
+
+def test_config_migrate_help_mentions_preview_apply_and_examples(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["config", "migrate", "--help"])
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    assert "usage: sync-remote config migrate" in captured.out
+    assert "默认先预览规范化结果；只有 `--apply` 才会写回配置文件" in captured.out
+    assert "可执行命令: `sync-remote config migrate` 或 `sr config migrate`" in captured.out
+    assert "示例:" in captured.out
+    assert "sr config migrate --json" in captured.out
+    assert "sr config migrate --apply" in captured.out
 
 
 def test_version_help_describes_current_version_output(capsys) -> None:

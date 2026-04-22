@@ -35,7 +35,9 @@ def test_repository_has_readme_license_and_gitignore() -> None:
     gitignore_content = gitignore.read_text(encoding="utf-8")
 
     assert "# sync-remote" in readme_content
-    assert "远程同步命令行工具" in readme_content
+    assert "SSH-first 远程开发同步命令行工具" in readme_content
+    assert "## 新手先看" in readme_content
+    assert "[docs/LEARN_BY_EXAMPLE.md](docs/LEARN_BY_EXAMPLE.md)" in readme_content
     assert "## 适用场景" in readme_content
     assert "需要在本地项目目录和远端开发机之间高频同步代码" in readme_content
     assert "同一份项目配置里切换默认目标或批量上传" in readme_content

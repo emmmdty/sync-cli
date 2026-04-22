@@ -1,5 +1,10 @@
 # Troubleshooting / 故障排查
 
+如果你还没完整走过一次基础流程，先回到教程：
+
+- 中文教程：[LEARN_BY_EXAMPLE.md](LEARN_BY_EXAMPLE.md)
+- English tutorial: [LEARN_BY_EXAMPLE.en.md](LEARN_BY_EXAMPLE.en.md)
+
 ## 故障排查
 
 ### 1. `doctor` 显示 `sshpass: MISSING`

@@ -1,10 +1,19 @@
 # sync-remote
 
-远程同步命令行工具，用来把当前项目目录同步到远端服务器，并提供下载、备份、环境检查、实时同步、VS Code Remote 打开和自更新能力。
+SSH-first 远程开发同步命令行工具，用来把当前项目目录同步到远端服务器，并提供下载、备份、环境检查、实时同步、VS Code Remote 打开和自更新能力。
 
 主命令是 `sync-remote`，同时提供简写别名 `sr`。
 
 English quickstart: [README.en.md](README.en.md)
+
+## 新手先看
+
+- 如果你是第一次接触这个工具，先读场景式教程：[docs/LEARN_BY_EXAMPLE.md](docs/LEARN_BY_EXAMPLE.md)
+- 需要英文版教程时，读这里：[docs/LEARN_BY_EXAMPLE.en.md](docs/LEARN_BY_EXAMPLE.en.md)
+- 推荐学习顺序：先看教程，再运行 `sr init`、`sr doctor`、`sr status`
+- 规范命令优先使用 `target`、`config`、`port-sync`
+- `switch`、`del`、`upload-all-gpu` 和 `sync_to_remote.py` 仍保留，但都属于兼容入口，不是新手主路径
+- 产品边界要先记住：这是 SSH-first 远程开发同步 CLI，不是通用双向同步平台，不承诺默认删除传播或冲突解决
 
 ## 适用场景
 
@@ -188,6 +197,8 @@ sync-remote update --help
 
 ## 文档导航
 
+- 新手教程（中文）：[docs/LEARN_BY_EXAMPLE.md](docs/LEARN_BY_EXAMPLE.md)
+- Beginner tutorial (English): [docs/LEARN_BY_EXAMPLE.en.md](docs/LEARN_BY_EXAMPLE.en.md)
 - 英文快速参考：`README.en.md`
 - 迁移说明：`docs/MIGRATION.md`
 - 故障排查：`docs/TROUBLESHOOTING.md`

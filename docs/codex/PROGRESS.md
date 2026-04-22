@@ -1,5 +1,35 @@
 # Codex progress log
 
+## 2026-04-22 audit: help / docs / learnability sync
+- Branch: `fix/docs-help-audit`
+- Worktree: `/home/tjk/myProjects/sync-cli/.worktrees/audit-help-docs`
+- Root preservation: original root worktree on `main` stayed untouched because it was already dirty.
+- Baseline tests executed before major edits:
+  - `uv run pytest -q`
+  - Result: `88 passed in 0.98s`
+- Concrete audit findings:
+  - root help did not clearly distinguish canonical commands from compatibility aliases
+  - `target use`, `target remove`, `target port-sync`, `config validate`, `config explain`, and `config migrate` lacked beginner-safe behavior notes and real examples
+  - wrapper help used the wrong program identity path unless invoked through explicit wrapper context, and did not explain that `sync_to_remote.py` is only a compatibility entrypoint
+  - README / README.en had no prominent beginner path and no case-based tutorial link
+  - no scenario tutorial existed that taught fixed-port vs dynamic-port workflows, preview/apply behavior, safe recovery, and legacy alias boundaries
+  - no lightweight regression test checked tutorial links, tutorial coverage, or whether documented core commands still exposed `--help`
+- Changes implemented:
+  - synchronized root help, canonical subcommand help, and wrapper help around canonical commands, compatibility aliases, examples, and safe preview/apply wording
+  - clarified product positioning as an SSH-first remote-development sync CLI in Chinese help and README text
+  - added bilingual beginner tutorials: `docs/LEARN_BY_EXAMPLE.md` and `docs/LEARN_BY_EXAMPLE.en.md`
+  - added README and README.en “Start Here / 新手先看” sections linking the tutorial
+  - updated migration and troubleshooting docs to point beginners back to the tutorial path
+  - added regression coverage for help contracts, wrapper help, tutorial links, tutorial section coverage, and documented command help entrypoints
+- Verification:
+  - `uv run pytest tests/test_help.py tests/test_wrapper.py tests/test_docs_consistency.py tests/test_packaging.py -q`
+  - Result: `44 passed in 0.26s`
+  - `uv run pytest -q`
+  - Result: `109 passed in 0.76s`
+- Remaining known gaps:
+  - troubleshooting remains a compact bilingual note rather than separate full Chinese and English documents
+  - this audit intentionally did not widen product scope into pull/recovery automation or bidirectional sync semantics
+
 ## Baseline
 - Current branch: preserved root on `main` is dirty and left untouched; phased execution starts from isolated worktrees.
 - Current version / package facts observed: package `sync-remote` version `0.4.3`; entrypoints `sync-remote` and `sr`; compatibility wrapper `sync_to_remote.py`.

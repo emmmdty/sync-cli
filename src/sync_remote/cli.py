@@ -52,6 +52,57 @@ class HelpFormatter(argparse.RawDescriptionHelpFormatter):
     pass
 
 
+def _root_description(*, prog: str) -> str:
+    if prog == "sync_to_remote.py":
+        return (
+            "兼容入口: sync_to_remote.py\n"
+            "`sync-remote` 和 `sr` 仍是推荐命令名。\n\n"
+            "定位: SSH-first 远程开发同步 CLI，不是通用双向同步平台。\n\n"
+            "命令名称:\n"
+            "  sync_to_remote.py  兼容包装入口\n"
+            "  sync-remote        完整命令名\n"
+            "  sr                 简写别名"
+        )
+    return (
+        "SSH-first 远程开发同步命令行工具\n\n"
+        "命令名称:\n"
+        "  sync-remote  完整命令名\n"
+        "  sr           简写别名"
+    )
+
+
+def _root_epilog(*, prog: str) -> str:
+    common_examples = (
+        "常用示例:\n"
+        "  sync-remote init\n"
+        "  sync-remote upload --dry-run\n"
+        "  sr upload\n"
+        "  sr up\n"
+        "  sr target list\n"
+        "  sr target use gpu-b\n"
+        "  sr config validate\n"
+        "  sr port-sync --json\n"
+        "  sr up --all-targets\n"
+        "  sync-remote download\n"
+        "  sr dl\n"
+        "  sr version\n"
+        "  sr update --channel release\n"
+        "  sync-remote open\n"
+        "  sr op\n"
+        "  sync-remote watch\n"
+        "  sr wt"
+    )
+    if prog != "sync_to_remote.py":
+        return common_examples
+    return (
+        f"{common_examples}\n\n"
+        "兼容入口示例:\n"
+        "  python sync_to_remote.py\n"
+        "  python sync_to_remote.py upload\n"
+        "  python sync_to_remote.py switch gpu-b"
+    )
+
+
 def _add_root_help_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-h",
@@ -156,33 +207,8 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
         add_help=False,
-        description=(
-            "远程同步命令行工具\n\n"
-            "命令名称:\n"
-            "  sync-remote  完整命令名\n"
-            "  sr           简写别名"
-        ),
-        epilog=(
-            "常用示例:\n"
-            "  sync-remote init\n"
-            "  sync-remote upload --dry-run\n"
-            "  sr upload\n"
-            "  sr up\n"
-            "  sr target list\n"
-            "  sr target use gpu-b\n"
-            "  sr config validate\n"
-            "  sr port-sync --json\n"
-            "  sr switch gpu-b\n"
-            "  sync-remote download\n"
-            "  sr dl\n"
-            "  sr upload-all-gpu\n"
-            "  sr version\n"
-            "  sr update --channel release\n"
-            "  sync-remote open\n"
-            "  sr op\n"
-            "  sync-remote watch\n"
-            "  sr wt"
-        ),
+        description=_root_description(prog=prog),
+        epilog=_root_epilog(prog=prog),
         formatter_class=HelpFormatter,
     )
     _add_root_help_argument(parser)
@@ -235,6 +261,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "  sr up\n"
             "  sr up --dry-run\n"
             "  sr up --hosts gpu-a gpu-b\n"
+            "  sr up --all-targets\n"
             "  sr up --sync-path src README.md\n"
             "  sr up --transport archive"
         ),
@@ -383,7 +410,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     switch_command = subparsers.add_parser(
         "switch",
         add_help=False,
-        help="切换默认上传服务器",
+        help="兼容命令：切换默认上传服务器（推荐 `target use`）",
         description=(
             "切换当前项目默认使用的服务器。\n"
             "可执行命令: `sync-remote switch` 或 `sr switch`\n\n"
@@ -391,7 +418,8 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "  - 可直接传入 host 别名\n"
             "  - 不传时会列出已配置服务器供选择\n"
             "  - 若传入不存在的 host，会提示后回退到选择列表\n"
-            "  - 切换后会更新配置中的默认服务器"
+            "  - 切换后会更新配置中的默认服务器\n\n"
+            "推荐改用: `sync-remote target use` / `sr target use`"
         ),
         epilog=(
             "示例:\n"
@@ -406,7 +434,7 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     delete_command = subparsers.add_parser(
         "del",
         add_help=False,
-        help="删除指定服务器配置",
+        help="兼容命令：删除指定服务器配置（推荐 `target remove`）",
         description=(
             "删除当前项目中的一个服务器配置。\n"
             "可执行命令: `sync-remote del` 或 `sr del`\n\n"
@@ -414,7 +442,8 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
             "  - 可直接传入 host 别名\n"
             "  - 不传时会列出已配置服务器供选择\n"
             "  - 若传入不存在的 host，会提示后回退到选择列表\n"
-            "  - 若删除默认服务器，会自动把最后一个剩余服务器设为默认"
+            "  - 若删除默认服务器，会自动把最后一个剩余服务器设为默认\n\n"
+            "推荐改用: `sync-remote target remove` / `sr target remove`"
         ),
         epilog=(
             "示例:\n"
@@ -429,14 +458,15 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     upload_all = subparsers.add_parser(
         "upload-all-gpu",
         add_help=False,
-        help="将当前目录上传到所有已配置服务器",
+        help="兼容命令：上传到所有已配置服务器（推荐 `upload --all-targets`）",
         description=(
             "并发把当前目录上传到配置文件中的所有服务器。\n"
             "可执行命令: `sync-remote upload-all-gpu` 或 `sr upload-all-gpu`\n\n"
             "行为说明:\n"
             "  - 内部复用 `upload --hosts <all>` 的批量上传逻辑\n"
             "  - 某个服务器失败时不会中断后续服务器\n"
-            "  - 全部完成后输出成功/失败汇总"
+            "  - 全部完成后输出成功/失败汇总\n\n"
+            "推荐改用: `sync-remote upload --all-targets` / `sr upload --all-targets`"
         ),
         epilog=(
             "示例:\n"
@@ -482,6 +512,18 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         "list",
         add_help=False,
         help="列出当前配置中的所有目标服务器",
+        description=(
+            "列出当前配置中的所有目标服务器。\n"
+            "可执行命令: `sync-remote target list` 或 `sr target list`\n\n"
+            "行为说明:\n"
+            "  - 文本输出会标记当前默认目标\n"
+            "  - `--json` 适合脚本或自动化检查"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr target list\n"
+            "  sr target list --json"
+        ),
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(target_list)
@@ -491,6 +533,20 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         "use",
         add_help=False,
         help="切换当前默认目标服务器",
+        description=(
+            "切换当前项目默认使用的目标服务器。\n"
+            "可执行命令: `sync-remote target use` 或 `sr target use`\n"
+            "兼容命令: `sync-remote switch` 或 `sr switch`\n\n"
+            "行为说明:\n"
+            "  - 可直接传入目标别名\n"
+            "  - 不传时会列出已配置目标供选择\n"
+            "  - 只切换默认目标，不改写其他配置"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr target use gpu-b\n"
+            "  sr target use"
+        ),
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(target_use)
@@ -500,6 +556,20 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         "remove",
         add_help=False,
         help="删除一个目标服务器配置",
+        description=(
+            "删除一个目标服务器配置。\n"
+            "可执行命令: `sync-remote target remove` 或 `sr target remove`\n"
+            "兼容命令: `sync-remote del` 或 `sr del`\n\n"
+            "行为说明:\n"
+            "  - 可直接传入目标别名\n"
+            "  - 不传时会列出已配置目标供选择\n"
+            "  - 删除默认目标时，会自动选择一个剩余目标作为默认值"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr target remove gpu-b\n"
+            "  sr target remove"
+        ),
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(target_remove)
@@ -509,6 +579,20 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         "port-sync",
         add_help=False,
         help="显式预览或应用目标服务器的端口同步结果",
+        description=(
+            "解析指定目标服务器的 SSH 端口，并以显式预览或应用方式同步结果。\n"
+            "可执行命令: `sync-remote target port-sync` 或 `sr target port-sync`\n"
+            "等价短写: `sync-remote port-sync` 或 `sr port-sync`\n\n"
+            "行为说明:\n"
+            "  - 默认只预览，不写配置文件，也不写 SSH config\n"
+            "  - `--apply` 时会把解析结果写回项目配置\n"
+            "  - 只有显式传入 `--write-ssh-config` 时才会写 SSH config"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr target port-sync gpu-a --json\n"
+            "  sr target port-sync gpu-a --apply --write-ssh-config"
+        ),
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(target_port_sync)
@@ -531,6 +615,18 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         "validate",
         add_help=False,
         help="检查当前项目配置是否可读取",
+        description=(
+            "检查当前项目配置是否可读取，不改写配置文件。\n"
+            "可执行命令: `sync-remote config validate` 或 `sr config validate`\n\n"
+            "行为说明:\n"
+            "  - 默认输出文本摘要\n"
+            "  - `--json` 适合 CI、脚本或自动化检查"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr config validate\n"
+            "  sr config validate --json"
+        ),
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(config_validate)
@@ -540,6 +636,18 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         "explain",
         add_help=False,
         help="解释当前配置的默认目标和目标列表",
+        description=(
+            "解释当前配置会如何被 CLI 理解。\n"
+            "可执行命令: `sync-remote config explain` 或 `sr config explain`\n\n"
+            "行为说明:\n"
+            "  - 会显示来源文件、当前配置版本、规范化写回版本和目标列表\n"
+            "  - `--json` 适合脚本读取"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr config explain\n"
+            "  sr config explain --json"
+        ),
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(config_explain)
@@ -549,6 +657,18 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
         "migrate",
         add_help=False,
         help="预览或应用 v3 规范化配置迁移",
+        description=(
+            "预览或应用 v3 规范化配置迁移。\n"
+            "可执行命令: `sync-remote config migrate` 或 `sr config migrate`\n\n"
+            "行为说明:\n"
+            "  - 默认先预览规范化结果；只有 `--apply` 才会写回配置文件\n"
+            "  - `--json` 可输出完整规范化结果，便于审查或自动化处理"
+        ),
+        epilog=(
+            "示例:\n"
+            "  sr config migrate --json\n"
+            "  sr config migrate --apply"
+        ),
         formatter_class=HelpFormatter,
     )
     _add_command_help_argument(config_migrate)
@@ -1571,7 +1691,7 @@ def _handle_doctor(args: argparse.Namespace) -> int:
 
 def _resolve_prog_name() -> str:
     invoked_as = Path(sys.argv[0]).name
-    return invoked_as if invoked_as in {"sync-remote", "sr"} else "sync-remote"
+    return invoked_as if invoked_as in {"sync-remote", "sr", "sync_to_remote.py"} else "sync-remote"
 
 
 def main(argv: list[str] | None = None) -> int:

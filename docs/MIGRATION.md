@@ -1,5 +1,10 @@
 # Migration / 迁移说明
 
+如果你是第一次使用，而不是在迁移旧配置，先看场景式教程：
+
+- 中文教程：[LEARN_BY_EXAMPLE.md](LEARN_BY_EXAMPLE.md)
+- English tutorial: [LEARN_BY_EXAMPLE.en.md](LEARN_BY_EXAMPLE.en.md)
+
 ## 迁移目标
 
 本仓库已经把新的规范写回格式统一到 `version: 3`，核心变化是：
@@ -51,6 +56,11 @@ sr port-sync --apply --write-ssh-config
 ## Migration
 
 The v3 config format keeps the product narrow: project-scoped SSH sync, fixed or provider-resolved ports, and explicit write actions only.
+
+If you are onboarding from scratch instead of migrating an older config, start with:
+
+- Chinese tutorial: [LEARN_BY_EXAMPLE.md](LEARN_BY_EXAMPLE.md)
+- English tutorial: [LEARN_BY_EXAMPLE.en.md](LEARN_BY_EXAMPLE.en.md)
 
 Recommended order:
 
