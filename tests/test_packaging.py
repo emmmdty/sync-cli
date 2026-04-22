@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import yaml
 
@@ -19,6 +20,21 @@ def test_pyproject_exposes_entrypoints_and_repository_metadata() -> None:
     assert 'license-files = ["LICENSE"]' in content
     assert 'License :: OSI Approved :: MIT License' not in content
     assert 'authors = [{ name = "emmmdty" }]' in content
+
+
+def test_uv_lock_keeps_local_package_version_in_sync_with_pyproject() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    lockfile = (ROOT / "uv.lock").read_text(encoding="utf-8")
+
+    pyproject_version = re.search(r'^version = "([^"]+)"$', pyproject, re.MULTILINE)
+    locked_version = re.search(
+        r'\[\[package\]\]\nname = "sync-remote"\nversion = "([^"]+)"',
+        lockfile,
+    )
+
+    assert pyproject_version is not None
+    assert locked_version is not None
+    assert locked_version.group(1) == pyproject_version.group(1)
 
 
 def test_repository_has_readme_license_and_gitignore() -> None:

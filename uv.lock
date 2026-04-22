@@ -290,7 +290,7 @@ wheels = [
 
 [[package]]
 name = "sync-remote"
-version = "0.4.3"
+version = "0.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "python-dotenv" },
